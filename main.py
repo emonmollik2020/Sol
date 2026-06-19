@@ -75,7 +75,7 @@ def bot_engine():
 
             # ১. এন্ট্রি প্রেডিকশন (BUY): ইন্ডিকেটর + বুলিশ প্যাটার্ন
             bull_signal = any(pt['t'] == 'bull' for pt in pats1) or any(pt['t'] == 'bull' for pt in pats3)
-            can_buy = p > e20 and r1 < 65 and mv > ms and bull_signal
+            can_buy = p > e20 and r1 < 45 and mv > ms and bull_signal
 
             # ২. স্মার্ট এক্সিট প্রেডিকশন (SELL): টেকনিক্যাল কারণে সেল
             bear_signal = any(pt['t'] == 'bear' for pt in pats3) # ৩ মিনিটে বেয়ারিশ প্যাটার্ন
