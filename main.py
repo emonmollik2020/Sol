@@ -17,7 +17,7 @@ STATE_FILE = "bot_state.json"
 INITIAL_FUND = 100.0
 
 # স্কাল্পিং সেটিংস: অল্প প্রফিট টার্গেট এবং টাইট স্টপ লস
-DEF_TP = 0.0025  # ০.২৫% টেক প্রফিট
+DEF_TP = 0.0020  # ০.২০% টেক প্রফিট
 DEF_SL = 0.0035  # ০.৩৫% স্টপ লস
 
 # থ্রেড লক
@@ -227,7 +227,7 @@ def bot_engine():
 
             if in_pos:
                 # ক. ব্রেক-ইভেন সুরক্ষাকবচ (Breakeven Protection)
-                breakeven_trigger = entry_p * 1.0012
+                breakeven_trigger = entry_p * 1.0008
                 if p >= breakeven_trigger and cur["sl_level"] < entry_p:
                     cur.update({"sl_level": round(entry_p, 2)})
                     cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": "🛡️ SL Breakeven-এ উন্নীত (ঝুঁকিমুক্ত ট্রেড)"})
