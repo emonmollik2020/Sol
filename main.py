@@ -190,7 +190,7 @@ def bot_engine():
     in_pos, entry_p, peak_p = False, 0.0, 0.0
     
     last_trade_time = 0         # শেষ সফল ট্রেড ক্লোজের টাইমস্ট্যাম্প
-    COOLDOWN_SECONDS = 300      # নতুন ট্রেড শুরুর আগে ৫ মিনিট (৩০০ সেকেন্ড) বিরতি
+    COOLDOWN_SECONDS = 90      # নতুন ট্রেড শুরুর আগে ৫ মিনিট (৩০০ সেকেন্ড) বিরতি
 
     while True:
         try:
