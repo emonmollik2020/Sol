@@ -82,7 +82,7 @@ app = Flask(__name__)
 
 
 # =====================================================================
-# SECTION 3: ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
+# SECTION 3: ১৭টি শক্তিশালী ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
 # =====================================================================
 def get_advanced_pats(df):
     """১৭টি শক্তিশালী ক্যান্ডেলস্টিক প্যাটার্ন সনাক্ত করার জন্য গাণিতিক লজিক"""
@@ -104,78 +104,56 @@ def get_advanced_pats(df):
     b2, t2, u2, l2, g2 = info(c2)
     b3, t3, u3, l3, g3 = info(c3)
 
-    # ==========================================
-    # ১. বুলিশ প্যাটার্নস (BUY সিগন্যাল)
-    # ==========================================
-    # 1. হ্যামার 🔨
+    # --- বুলিশ প্যাটার্নস (BUY সিগন্যাল) ---
     if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1:
         p.append({"n": "হ্যামার 🔨", "t": "bull"})
         
-    # 2. ইনভার্টেড হ্যামার 🔨
     if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and g1:
         p.append({"n": "ইনভার্টেড হ্যামার 🔨", "t": "bull"})
         
-    # 3. বুলিশ এনগালফিং 📈
     if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']:
         p.append({"n": "বুলিশ এনগালফিং 📈", "t": "bull"})
         
-    # 4. মর্নিং স্টার 🌅
     if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2:
         p.append({"n": "মর্নিং স্টার 🌅", "t": "bull"})
         
-    # 5. বুলিশ মারুবোজু 💪
     if b1 / t1 > 0.85 and g1:
         p.append({"n": "বুলিশ মারুবোজু 💪", "t": "bull"})
         
-    # 6. পিয়ার্সিং লাইন ⚡
     if not g2 and g1 and c1['o'] < c2['c'] and c1['c'] > (c2['o'] + c2['c']) / 2 and c1['c'] < c2['o']:
         p.append({"n": "পিয়ার্সিং লাইন ⚡", "t": "bull"})
         
-    # 7. বুলিশ হারামি 🤰
     if not g2 and g1 and c1['c'] < c2['o'] and c1['o'] > c2['c'] and b1 < b2:
         p.append({"n": "বুলিশ হারামি 🤰", "t": "bull"})
         
-    # 8. থ্রি হোয়াইট সোলজার্স 💂‍♂️
     if g1 and g2 and g3 and c1['c'] > c2['c'] and c2['c'] > c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2:
         p.append({"n": "থ্রি হোয়াইট সোলজার্স 💂‍♂️", "t": "bull"})
         
-    # 9. টুইজার বটম 🧲
     if abs(c1['l'] - c2['l']) / max(0.001, c1['l']) < 0.001 and not g2 and g1:
         p.append({"n": "টুইজার বটম 🧲", "t": "bull"})
 
-
-    # ==========================================
-    # ২. বেয়ারিশ প্যাটার্নস (SELL সিগন্যাল)
-    # ==========================================
-    # 10. শুটিং স্টার ☄️
+    # --- বেয়ারিশ প্যাটার্নস (SELL সিগন্যাল) ---
     if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and not g1:
         p.append({"n": "শুটিং স্টার ☄️", "t": "bear"})
         
-    # 11. হ্যাঙ্গিং ম্যান 🕴️
     if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1 and not g1:
         p.append({"n": "হ্যাঙ্গিং ম্যান 🕴️", "t": "bear"})
         
-    # 12. বেয়ারিশ এনগালফিং 📉
     if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']:
         p.append({"n": "বেয়ারিশ এনগালফিং 📉", "t": "bear"})
         
-    # 13. ইভনিং স্টার 🌃
     if g3 and b2 < (b3 * 0.3) and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2:
         p.append({"n": "ইভনিং স্টার 🌃", "t": "bear"})
         
-    # 14. বেয়ারিশ মারুবোজু 🔴
     if b1 / t1 > 0.85 and not g1:
         p.append({"n": "বেয়ারিশ মারুবোজু 🔴", "t": "bear"})
         
-    # 15. ডার্ক ক্লাউড কভার ⛈️
     if g2 and not g1 and c1['o'] > c2['c'] and c1['c'] < (c2['o'] + c2['c']) / 2 and c1['c'] > c2['o']:
         p.append({"n": "ডার্ক ক্লাউড কভার ⛈️", "t": "bear"})
         
-    # 16. বেয়ারিশ হারামি 🤰
     if g2 and not g1 and c1['c'] > c2['o'] and c1['o'] < c2['c'] and b1 < b2:
         p.append({"n": "বেয়ারিশ হারামি 🤰", "t": "bear"})
         
-    # 17. থ্রি ব্ল্যাক ক্রোস 🐦
     if not g1 and not g2 and not g3 and c1['c'] < c2['c'] and c2['c'] < c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2:
         p.append({"n": "থ্রি ব্ল্যাক ক্রোস 🐦", "t": "bear"})
 
@@ -183,31 +161,40 @@ def get_advanced_pats(df):
 
 
 # =====================================================================
-# SECTION 4: মূল ট্রেডিং বট ইঞ্জিন লজিক (সহায়ক ব্যাকগ্রাউন্ড থ্রেড)
+# SECTION 4: মূল ট্রেডিং বট ইঞ্জিন লজিক (৩ সেকেন্ড আপডেট সহ)
 # =====================================================================
 def bot_engine():
     wins, total, net_pnl, pnl_hist = 0, 0, 0.0, [0]
     in_pos, entry_p, peak_p = False, 0.0, 0.0
     
     last_trade_time = 0         # শেষ সফল ট্রেড ক্লোজের টাইমস্ট্যাম্প
-    COOLDOWN_SECONDS = 30      # নতুন ট্রেড শুরুর আগে ৫ মিনিট (৩০০ সেকেন্ড) বিরতি
+    COOLDOWN_SECONDS = 300      # নতুন ট্রেড শুরুর আগে ৫ মিনিট (৩০০ সেকেন্ড) বিরতি
 
     while True:
         try:
-            # ১ মিনিট এবং ৩ মিনিটের মোমবাতি (OHLCV) ডেটা সংগ্রহ
+            # ১ মিনিট, ৩ মিনিট এবং ১৫ মিনিটের মোমবাতি (OHLCV) ডেটা সংগ্রহ
             bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=200)
             bars3 = exchange.fetch_ohlcv(SYMBOL, '3m', limit=200)
+            bars15 = exchange.fetch_ohlcv(SYMBOL, '15m', limit=100) # ১৫ মিনিটের ডেটা
             
             df1 = pd.DataFrame(bars1, columns=['t', 'o', 'h', 'l', 'c', 'v'])
             df3 = pd.DataFrame(bars3, columns=['t', 'o', 'h', 'l', 'c', 'v'])
+            df15 = pd.DataFrame(bars15, columns=['t', 'o', 'h', 'l', 'c', 'v'])
             
             p = df1['c'].iloc[-1]
             
-            # টেকনিক্যাল ইন্ডিকেটর গণনা (RSI, EMA, MACD)
+            # টেকনিক্যাল ইন্ডিকেটর গণনা (RSI, EMA, MACD, ADX)
             r1 = ta.momentum.rsi(df1['c']).fillna(0).iloc[-1]
             e20 = ta.trend.ema_indicator(df1['c'], 20).fillna(0).iloc[-1]
-            r3 = ta.momentum.rsi(df3['c']).fillna(0).iloc[-1]
             
+            # ADX (ট্রেন্ড শক্তি মাপা)
+            adx_val = ta.trend.adx(df1['h'], df1['l'], df1['c'], window=14).fillna(0).iloc[-1]
+            
+            # ১৫-মিনিটের ম্যাক্রো ইএমএ ২০ (Macro Trend Filter)
+            e15_20 = ta.trend.ema_indicator(df15['c'], 20).fillna(0).iloc[-1]
+            
+            # ৩-মিনিটের ইন্ডিকেটর
+            r3 = ta.momentum.rsi(df3['c']).fillna(0).iloc[-1]
             m_obj = ta.trend.MACD(df3['c'])
             mv = m_obj.macd().iloc[-1]
             ms = m_obj.macd_signal().iloc[-1]
@@ -225,11 +212,25 @@ def bot_engine():
 
             # ১. ক্রয়ের লজিক (BUY Condition)
             bull_signal = any(pt['t'] == 'bull' for pt in pats1) or any(pt['t'] == 'bull' for pt in pats3)
-            can_buy = p > e20 and (40 < r1 < 65) and mv > ms and bull_signal and cooldown_over
+            
+            # নতুন কন্ডিশনস: ADX মান ২৩ এর উপরে (ট্রেন্ডিং মার্কেট) এবং ১৫-মিনিটে ম্যাক্রো আপট্রেন্ড
+            is_strongly_trending = adx_val > 23
+            macro_uptrend = p > e15_20
+            
+            can_buy = (p > e20 and 
+                       macro_uptrend and 
+                       is_strongly_trending and 
+                       (40 < r1 < 65) and 
+                       mv > ms and 
+                       bull_signal and 
+                       cooldown_over)
 
             # ২. বিক্রয়ের লজিক (SELL / Exit Condition)
             bear_signal = any(pt['t'] == 'bear' for pt in pats3)
-            smart_sell = r1 > 75 or bear_signal
+            
+            # স্মার্ট এক্সিট অপ্টিমাইজড: অতিরিক্ত প্যানিক সেল এড়াতে 
+            # RSI ৮০-এর বেশি হলে অথবা মূল্য EMA 20 এর নিচে নেমে সাথে বেয়ারিশ প্যাটার্ন থাকলে বিক্রি হবে
+            smart_sell = r1 > 80 or (p < e20 and bear_signal)
 
             if in_pos:
                 # ট্রেইলিং স্টপ লস আপডেট করা
@@ -320,6 +321,10 @@ def bot_engine():
             elif not cooldown_over:
                 remaining_seconds = int(COOLDOWN_SECONDS - time_since_last_trade)
                 cur["wait_reason"] = f"কুলডাউন ({remaining_seconds} সেকেন্ড বাকি)"
+            elif not is_strongly_trending:
+                cur["wait_reason"] = f"সাইডওয়েজ মার্কেট (ADX: {round(adx_val, 1)} - দুর্বল ট্রেন্ড)"
+            elif not macro_uptrend:
+                cur["wait_reason"] = "ম্যাক্রো ডাউনট্রেন্ড (১৫-মিনিট চার্ট নিচে)"
             else:
                 cur["wait_reason"] = "প্যাটার্ন খুঁজছে..." if p > e20 else "ট্রেন্ড ডাউন"
                 
@@ -328,6 +333,7 @@ def bot_engine():
             # এক্সচেঞ্জ নেটওয়ার্ক বা যেকোনো সমস্যার লগ কনসোলে প্রিন্ট করা (ডিব্যাগ করার জন্য)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot Engine Warning: {e}")
             
+        # ডাটা প্রতি ৩ সেকেন্ড পর পর আপডেট হবে
         time.sleep(3)
 
 
@@ -361,6 +367,7 @@ UI = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Master SOL Bot</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>setInterval(() => location.reload(), 600000);</script>
     <style>
         body { background-color: #f8fafc; font-family: 'Segoe UI', sans-serif; }
         .card { background: white; border-radius: 1rem; border: 1px solid #f1f5f9; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
