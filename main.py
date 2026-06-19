@@ -85,11 +85,11 @@ app = Flask(__name__)
 # SECTION 3: ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
 # =====================================================================
 def get_advanced_pats(df):
-    """মার্কেটের ক্যান্ডেলস্টিক প্যাটার্নসমূহ সনাক্ত করে"""
+    """১৭টি শক্তিশালী ক্যান্ডেলস্টিক প্যাটার্ন সনাক্ত করার জন্য গাণিতিক লজিক"""
     p = []
     if len(df) < 5:
         return p
-    
+        
     c1, c2, c3 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
     
     def info(c):
@@ -97,34 +97,88 @@ def get_advanced_pats(df):
         total = max(0.001, c['h'] - c['l'])
         u_wick = c['h'] - max(c['c'], c['o'])
         l_wick = min(c['c'], c['o']) - c['l']
-        return body, total, u_wick, l_wick, c['c'] > c['o']
+        is_green = c['c'] > c['o']
+        return body, total, u_wick, l_wick, is_green
         
     b1, t1, u1, l1, g1 = info(c1)
     b2, t2, u2, l2, g2 = info(c2)
     b3, t3, u3, l3, g3 = info(c3)
 
-    # --- বুলিশ প্যাটার্নস (BUY সিগন্যাল শক্তিশালী করে) ---
+    # ==========================================
+    # ১. বুলিশ প্যাটার্নস (BUY সিগন্যাল)
+    # ==========================================
+    # 1. হ্যামার 🔨
     if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1:
-        p.append({"n": "হ্যামার &#128296;", "t": "bull"})
-    if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']:
-        p.append({"n": "বুলিশ এনগালফিং &#128200;", "t": "bull"})
-    if b1 / t1 > 0.85 and g1:
-        p.append({"n": "বুলিশ মারুবোজু &#128170;", "t": "bull"})
-    if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2:
-        p.append({"n": "মর্নিং স্টার &#127749;", "t": "bull"})
-    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and g1:
-        p.append({"n": "ইনভার্টেড হ্যামার &#128296;", "t": "bull"})
-    
-    # --- বেয়ারিশ প্যাটার্নস (SELL সিগন্যাল শক্তিশালী করে) ---
-    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1:
-        p.append({"n": "শুটিং স্টার &#9732;", "t": "bear"})
-    if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']:
-        p.append({"n": "বেয়ারিশ এনগালফিং &#128201;", "t": "bear"})
-    if b1 / t1 > 0.85 and not g1:
-        p.append({"n": "বেয়ারিশ মারুবোজু &#128308;", "t": "bear"})
-    if b1 <= (t1 * 0.1):
-        p.append({"n": "ডোজি &#9878;", "t": "neut"})
+        p.append({"n": "হ্যামার 🔨", "t": "bull"})
         
+    # 2. ইনভার্টেড হ্যামার 🔨
+    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and g1:
+        p.append({"n": "ইনভার্টেড হ্যামার 🔨", "t": "bull"})
+        
+    # 3. বুলিশ এনগালফিং 📈
+    if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']:
+        p.append({"n": "বুলিশ এনগালফিং 📈", "t": "bull"})
+        
+    # 4. মর্নিং স্টার 🌅
+    if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2:
+        p.append({"n": "মর্নিং স্টার 🌅", "t": "bull"})
+        
+    # 5. বুলিশ মারুবোজু 💪
+    if b1 / t1 > 0.85 and g1:
+        p.append({"n": "বুলিশ মারুবোজু 💪", "t": "bull"})
+        
+    # 6. পিয়ার্সিং লাইন ⚡
+    if not g2 and g1 and c1['o'] < c2['c'] and c1['c'] > (c2['o'] + c2['c']) / 2 and c1['c'] < c2['o']:
+        p.append({"n": "পিয়ার্সিং লাইন ⚡", "t": "bull"})
+        
+    # 7. বুলিশ হারামি 🤰
+    if not g2 and g1 and c1['c'] < c2['o'] and c1['o'] > c2['c'] and b1 < b2:
+        p.append({"n": "বুলিশ হারামি 🤰", "t": "bull"})
+        
+    # 8. থ্রি হোয়াইট সোলজার্স 💂‍♂️
+    if g1 and g2 and g3 and c1['c'] > c2['c'] and c2['c'] > c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2:
+        p.append({"n": "থ্রি হোয়াইট সোলজার্স 💂‍♂️", "t": "bull"})
+        
+    # 9. টুইজার বটম 🧲
+    if abs(c1['l'] - c2['l']) / max(0.001, c1['l']) < 0.001 and not g2 and g1:
+        p.append({"n": "টুইজার বটম 🧲", "t": "bull"})
+
+
+    # ==========================================
+    # ২. বেয়ারিশ প্যাটার্নস (SELL সিগন্যাল)
+    # ==========================================
+    # 10. শুটিং স্টার ☄️
+    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and not g1:
+        p.append({"n": "শুটিং স্টার ☄️", "t": "bear"})
+        
+    # 11. হ্যাঙ্গিং ম্যান 🕴️
+    if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1 and not g1:
+        p.append({"n": "হ্যাঙ্গিং ম্যান 🕴️", "t": "bear"})
+        
+    # 12. বেয়ারিশ এনগালফিং 📉
+    if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']:
+        p.append({"n": "বেয়ারিশ এনগালফিং 📉", "t": "bear"})
+        
+    # 13. ইভনিং স্টার 🌃
+    if g3 and b2 < (b3 * 0.3) and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2:
+        p.append({"n": "ইভনিং স্টার 🌃", "t": "bear"})
+        
+    # 14. বেয়ারিশ মারুবোজু 🔴
+    if b1 / t1 > 0.85 and not g1:
+        p.append({"n": "বেয়ারিশ মারুবোজু 🔴", "t": "bear"})
+        
+    # 15. ডার্ক ক্লাউড কভার ⛈️
+    if g2 and not g1 and c1['o'] > c2['c'] and c1['c'] < (c2['o'] + c2['c']) / 2 and c1['c'] > c2['o']:
+        p.append({"n": "ডার্ক ক্লাউড কভার ⛈️", "t": "bear"})
+        
+    # 16. বেয়ারিশ হারামি 🤰
+    if g2 and not g1 and c1['c'] > c2['o'] and c1['o'] < c2['c'] and b1 < b2:
+        p.append({"n": "বেয়ারিশ হারামি 🤰", "t": "bear"})
+        
+    # 17. থ্রি ব্ল্যাক ক্রোস 🐦
+    if not g1 and not g2 and not g3 and c1['c'] < c2['c'] and c2['c'] < c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2:
+        p.append({"n": "থ্রি ব্ল্যাক ক্রোস 🐦", "t": "bear"})
+
     return p
 
 
