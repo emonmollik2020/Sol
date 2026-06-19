@@ -134,7 +134,7 @@ def get_advanced_pats(df):
 
 
 # =====================================================================
-# SECTION 4: মূল স্কাল্পিং বট ইঞ্জিন লজিক (আল্ট্রা-ফাস্ট নেটওয়ার্ক অপ্টিমাইজড)
+# SECTION 4: মূল স্কাল্পিং বট ইঞ্জিন লজিক (রিস্যাম্পলিং টেকনিক)
 # =====================================================================
 def bot_engine():
     wins, total, net_pnl, pnl_hist = 0, 0, 0.0, [0]
@@ -142,27 +142,44 @@ def bot_engine():
     
     last_trade_time = 0         # শেষ সফল ট্রেড ক্লোজের টাইমস্ট্যাম্প
     COOLDOWN_SECONDS = 60       # স্কাল্পিংয়ের জন্য মাত্র ১ মিনিট কুলডাউন
-    
-    # এপিআই ট্রাফিক ও নেটওয়ার্ক ল্যাগ এড়াতে ওএইচএলসিভি ক্যাশ ভেরিয়েবল
-    bars3 = []
-    bars5 = []
-    last_fetch_3m_5m = 0
 
     while True:
         try:
-            # ১ মিনিটের ফাস্ট লাইভ ডাটা প্রতি লুপে রিকোয়েস্ট হবে
-            bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=100)
+            # ১ মিনিটের ডাটা রিকোয়েস্ট (লিমিট ৩০০টি ক্যান্ডেল, যা থেকে ৩ ও ৫ মিনিট তৈরি হবে)
+            # এটি এক্সচেঞ্জে ৩টির জায়গায় মাত্র ১টি রিকোয়েস্ট পাঠাবে (সম্পূর্ণ নো-ল্যাগ)
+            bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=300)
             
-            # ৩ এবং ৫ মিনিটের ডাটা প্রতি ৩০ সেকেন্ডে ক্যাশ থেকে আপডেট হবে (এপিআই ল্যাগ বা জ্যাম এড়াতে)
-            now = time.time()
-            if now - last_fetch_3m_5m > 30 or not bars3 or not bars5:
-                bars3 = exchange.fetch_ohlcv(SYMBOL, '3m', limit=100)
-                bars5 = exchange.fetch_ohlcv(SYMBOL, '5m', limit=100)
-                last_fetch_3m_5m = now
-            
+            # ১ মিনিটের অরিজিনাল ডাটাফ্রেম তৈরি করা
             df1 = pd.DataFrame(bars1, columns=['t', 'o', 'h', 'l', 'c', 'v'])
-            df3 = pd.DataFrame(bars3, columns=['t', 'o', 'h', 'l', 'c', 'v'])
-            df5 = pd.DataFrame(bars5, columns=['t', 'o', 'h', 'l', 'c', 'v'])
+            
+            # ডেটটাইম ইনডেক্স সেট করা (রিস্যাম্পলিং বা মোমবাতি জোড়া দেওয়ার জন্য)
+            df1['dt'] = pd.to_datetime(df1['t'], unit='ms')
+            df1.set_index('dt', inplace=True)
+            
+            # মেমোরির ভেতরেই ১-মিনিটের ডাটা থেকে ৩-মিনিটের চার্ট তৈরি করা
+            df3 = df1.resample('3min').agg({
+                't': 'first',
+                'o': 'first',
+                'h': 'max',
+                'l': 'min',
+                'c': 'last',
+                'v': 'sum'
+            }).dropna()
+            df3.reset_index(drop=True, inplace=True)
+            
+            # মেমোরির ভেতরেই ১-মিনিটের ডাটা থেকে ৫-মিনিটের চার্ট তৈরি করা
+            df5 = df1.resample('5min').agg({
+                't': 'first',
+                'o': 'first',
+                'h': 'max',
+                'l': 'min',
+                'c': 'last',
+                'v': 'sum'
+            }).dropna()
+            df5.reset_index(drop=True, inplace=True)
+            
+            # ১-মিনিটের অরিজিনাল ডাটাফ্রেমের ইনডেক্স স্বাভাবিক করা
+            df1.reset_index(drop=True, inplace=True)
             
             p = df1['c'].iloc[-1]
             
@@ -301,6 +318,7 @@ def bot_engine():
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot Engine Warning: {e}")
             
+        # মাত্র ১টি এপিআই রিকোয়েস্ট হওয়ার কারণে ৩ সেকেন্ড লোড অত্যন্ত স্থিতিশীল
         time.sleep(3)
 
 
