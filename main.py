@@ -82,88 +82,55 @@ def get_advanced_pats(df):
     
     return p
 
-# --- ১৭টি শক্তিশালী প্যাটার্ন ডিটেক্টর (প্রেডিকশন ইঞ্জিনের জন্য) ---
-def get_advanced_pats(df):
-    p = []
-    if len(df) < 5: return p
-    c1, c2, c3 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-    def info(c):
-        body = abs(c['c']-c['o'])
-        total = max(0.001, c['h']-c['l'])
-        u_wick, l_wick = c['h']-max(c['c'],c['o']), min(c['c'],c['o'])-c['l']
-        return body, total, u_wick, l_wick, c['c']>c['o']
-    b1, t1, u1, l1, g1 = info(c1)
-    b2, t2, u2, l2, g2 = info(c2)
-    b3, t3, u3, l3, g3 = info(c3)
-
-    # বুলিশ প্যাটার্নস (BUY সিগন্যাল শক্তিশালী করে)
-    if b1 > 0 and l1 >= 1.8*b1 and u1 <= 0.2*b1: p.append({"n": "হ্যামার &#128296;", "t": "bull"})
-    if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']: p.append({"n": "বুলিশ এনগালফিং &#128200;", "t": "bull"})
-    if b1/t1 > 0.85 and g1: p.append({"n": "বুলিশ মারুবোজু &#128170;", "t": "bull"})
-    if not g3 and b2 < (b3*0.3) and g1 and c1['c'] > (c3['o']+c3['c'])/2: p.append({"n": "মর্নিং স্টার &#127749;", "t": "bull"})
-    if b1 > 0 and u1 >= 1.8*b1 and l1 <= 0.2*b1 and g1: p.append({"n": "ইনভার্টেড হ্যামার &#128296;", "t": "bull"})
-    
-    # বেয়ারিশ প্যাটার্নস (SELL সিগন্যাল শক্তিশালী করে)
-    if b1 > 0 and u1 >= 1.8*b1 and l1 <= 0.2*b1: p.append({"n": "শুটিং স্টার &#9732;", "t": "bear"})
-    if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']: p.append({"n": "বেয়ারিশ এনগালফিং &#128201;", "t": "bear"})
-    if b1/t1 > 0.85 and not g1: p.append({"n": "বেয়ারিশ মারুবোজু &#128308;", "t": "bear"})
-    if b1 <= (t1*0.1): p.append({"n": "ডোজি &#9878;", "t": "neut"})
-    return p
-
-# --- নতুন ও শক্তিশালী ট্রেডিং ইঞ্জিন লজিক ---
+# --- ট্রেডিং ইঞ্জিন লজিক (সংশোধিত: ফিক্সড টিপি ও ট্রেলিং এসএল) ---
 def bot_engine():
-    wins, total, net_pnl, pnl_hist = 0, 0, 0.0, [0]
-    in_pos, entry_p, peak_p = False, 0.0, 0.0
+    wins, total, net_pnl, pnl_hist, in_pos, entry_p, peak_p = 0, 0, 0.0, [0], False, 0.0, 0.0
     while True:
         try:
-            bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=200)
-            bars3 = exchange.fetch_ohlcv(SYMBOL, '3m', limit=200)
+            bars1, bars3 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=200), exchange.fetch_ohlcv(SYMBOL, '3m', limit=200)
             df1, df3 = pd.DataFrame(bars1, columns=['t','o','h','l','c','v']), pd.DataFrame(bars3, columns=['t','o','h','l','c','v'])
             p = df1['c'].iloc[-1]
-            r1, e20 = ta.momentum.rsi(df1['c']).fillna(0).iloc[-1], ta.trend.ema_indicator(df1['c'], 20).fillna(0).iloc[-1]
-            r3, m_obj = ta.momentum.rsi(df3['c']).fillna(0).iloc[-1], ta.trend.MACD(df3['c'])
+            r1, e20 = ta.momentum.rsi(df1['c']).iloc[-1], ta.trend.ema_indicator(df1['c'], 20).iloc[-1]
+            e50 = ta.trend.ema_indicator(df1['c'], 50).iloc[-1]
+            r3, m_obj = ta.momentum.rsi(df3['c']).iloc[-1], ta.trend.MACD(df3['c'])
             mv, ms = m_obj.macd().iloc[-1], m_obj.macd_signal().iloc[-1]
             
-            pats1 = get_advanced_pats(df1)
-            pats3 = get_advanced_pats(df3)
             cur = load_state()
             l_pnl = ((p/entry_p)-1)*100 if in_pos else 0.0
             l_val = (100.0/entry_p*p)-100.0 if in_pos else 0.0
 
-            # ১. এন্ট্রি প্রেডিকশন (BUY): ইন্ডিকেটর + বুলিশ প্যাটার্ন
-            bull_signal = any(pt['t'] == 'bull' for pt in pats1) or any(pt['t'] == 'bull' for pt in pats3)
-            can_buy = p > e20 and r1 < 65 and mv > ms and bull_signal
-
-            # ২. স্মার্ট এক্সিট প্রেডিকশন (SELL): টেকনিক্যাল কারণে সেল
-            bear_signal = any(pt['t'] == 'bear' for pt in pats3) # ৩ মিনিটে বেয়ারিশ প্যাটার্ন
-            smart_sell = r1 > 75 or bear_signal # আরএসআই ওভারবট বা বেয়ারিশ প্যাটার্ন
-
+            # ট্রেলিং এসএল আপডেট (টিপি ফিক্সড থাকবে)
             if in_pos:
                 if p > peak_p:
                     peak_p = p
-                    cur.update({"sl_level": round(p*(1-DEF_SL),2)}) # ট্রেলিং এসএল
+                    cur.update({"sl_level": round(peak_p * (1 - DEF_SL), 2)})
 
-                # হয় প্রফিট টার্গেট হিট করবে, নয়তো টেকনিক্যাল সিগন্যালে সেল হবে
-                if p >= cur["tp_level"] or p <= cur["sl_level"] or smart_sell:
-                    in_pos = False
-                    net_pnl += l_val
-                    pnl_hist.append(net_pnl)
-                    if p > entry_p: wins += 1
-                    cur.update({"balance":round(100.0+net_pnl,2),"total_pnl":round(net_pnl,2),"win_rate":round((wins/total)*100,1),"best":round(max(pnl_hist),2),"last_action":"SELL"})
-                    cur["history"].insert(0,{"t":datetime.now().strftime("%H:%M"),"a":"SELL","p":round(p,2),"r":f"{round(l_pnl,2)}%"})
-                    cur["log"].insert(0,{"t":datetime.now().strftime("%H:%M"),"m":f"🔴 SELL @ ${p:.2f} ({'Smart Exit' if smart_sell else 'Target'})"})
-            else:
-                if can_buy:
-                    entry_p, peak_p, in_pos, total = p, p, True, total+1
-                    cur.update({"trades":total,"balance":0.0,"sl_level":round(p*(1-DEF_SL),2),"tp_level":round(p*(1+DEF_TP),2),"last_action":"BUY"})
-                    cur["history"].insert(0,{"t":datetime.now().strftime("%H:%M"),"a":"BUY","p":round(p,2),"r":"---"})
-                    cur["log"].insert(0,{"t":datetime.now().strftime("%H:%M"),"m":f"🟢 BUY @ ${p:.2f} (Prediction Confirmed)"})
+            cur.update({"price":round(p,2),"last_update":datetime.now(timezone.utc).strftime("%H:%M:%S"),"in_position":in_pos,"live_pnl_pct":round(l_pnl,2),"live_pnl_val":round(l_val,2),"entry_price":round(entry_p,2),"analysis_1m":{"rsi":round(r1,1),"ema":round(e20,2),"ema50":round(e50,2),"sig":"বুলিশ ✅" if p>e20 else "বেয়ারিশ ❌","pats":get_advanced_pats(df1)},"analysis_3m":{"rsi":round(r3,1),"macd":round(mv,3),"sig":"বুলিশ ✅" if mv>ms else "অপেক্ষা","pats":get_advanced_pats(df3)}})
+
+            if not in_pos and p>e20 and r1<65 and mv>ms:
+                entry_p, peak_p, in_pos, total = p, p, True, total+1
+                cur.update({"trades":total,"balance":0.0,"sl_level":round(p*(1-DEF_SL),2),"tp_level":round(p*(1+DEF_TP),2),"last_action":"BUY"})
+                cur["history"].insert(0,{"t":datetime.now().strftime("%H:%M"),"a":"BUY","p":round(p,2),"r":"---"})
+                cur["log"].insert(0,{"t":datetime.now().strftime("%H:%M"),"m":f"🟢 BUY @ ${p:.2f}"})
+            elif in_pos and (p >= cur["tp_level"] or p <= cur["sl_level"]):
+                in_pos = False
+                net_pnl += l_val
+                pnl_hist.append(net_pnl)
+                if p > entry_p: wins += 1
+                cur.update({"balance":round(100.0+net_pnl,2),"total_pnl":round(net_pnl,2),"win_rate":round((wins/total)*100,1),"best":round(max(pnl_hist),2),"worst":round(min(pnl_hist),2),"last_action":"SELL"})
+                cur["history"].insert(0,{"t":datetime.now().strftime("%H:%M"),"a":"SELL","p":round(p,2),"r":f"{round(l_pnl,2)}%"})
+                cur["log"].insert(0,{"t":datetime.now().strftime("%H:%M"),"m":f"🔴 SELL @ ${p:.2f}"})
             
-            cur.update({"price":round(p,2),"last_update":datetime.now(timezone.utc).strftime("%H:%M:%S"),"in_position":in_pos,"live_pnl_pct":round(l_pnl,2),"live_pnl_val":round(l_val,2),"entry_price":round(entry_p,2),"analysis_1m":{"rsi":round(r1,1),"ema":round(e20,2),"sig":"BULLISH" if p>e20 else "BEARISH","pats":pats1},"analysis_3m":{"rsi":round(r3,1),"macd":round(mv,3),"sig":"BULLISH" if mv>ms else "WAIT","pats":pats3}})
-            cur["wait_reason"] = "পজিশন সক্রিয়" if in_pos else ("প্যাটার্ন খুঁজছে..." if p>e20 else "ট্রেন্ড ডাউন")
+            cur["wait_reason"] = "ট্রেড লাইভ আছে" if in_pos else ("১মি ট্রেন্ড দুর্বল" if p<=e20 else "এন্ট্রি খুঁজছে...")
             save_state(cur)
         except: pass
         time.sleep(10)
+
+threading.Thread(target=bot_engine, daemon=True).start()
+@app.route('/api/data')
+def api(): return jsonify(load_state())
+@app.route('/')
+def index(): return render_template_string(UI)
     
 UI = """
 <!DOCTYPE html>
