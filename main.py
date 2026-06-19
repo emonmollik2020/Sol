@@ -16,9 +16,9 @@ SYMBOL = "SOL/USDT"
 STATE_FILE = "bot_state.json"
 INITIAL_FUND = 100.0
 
-# টেক প্রফিট (০.৭%) এবং স্টপ লস (১.০%) এর পার্সেন্টেজ
-DEF_TP = 0.007
-DEF_SL = 0.010
+# স্কাল্পিং সেটিংস: অল্প প্রফিট টার্গেট এবং টাইট স্টপ লস
+DEF_TP = 0.0025  # ০.২৫% টেক প্রফিট (খুব দ্রুত লাভ বুক করবে)
+DEF_SL = 0.0035  # ০.৩৫% স্টপ লস (অল্পতে লস কাটবে)
 
 # থ্রেড ক্ল্যাশ বা ফাইল লক সমস্যা এড়াতে গ্লোবাল থ্রেড লক
 STATE_LOCK = threading.Lock()
@@ -143,7 +143,7 @@ def get_advanced_pats(df):
         p.append({"n": "বেয়ারিশ এনগালফিং 📉", "t": "bear"})
         
     if g3 and b2 < (b3 * 0.3) and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2:
-        p.append({"n": "ইভনিং স্টার 🌃", "t": "bear"})
+        p.append({"n": "ইভনিং স্টার 🌅", "t": "bear"})
         
     if b1 / t1 > 0.85 and not g1:
         p.append({"n": "বেয়ারিশ মারুবোজু 🔴", "t": "bear"})
@@ -161,37 +161,35 @@ def get_advanced_pats(df):
 
 
 # =====================================================================
-# SECTION 4: মূল ট্রেডিং বট ইঞ্জিন লজিক (৩ সেকেন্ড আপডেট সহ)
+# SECTION 4: মূল স্কাল্পিং বট ইঞ্জিন লজিক (৩ সেকেন্ড আপডেট সহ)
 # =====================================================================
 def bot_engine():
     wins, total, net_pnl, pnl_hist = 0, 0, 0.0, [0]
     in_pos, entry_p, peak_p = False, 0.0, 0.0
     
     last_trade_time = 0         # শেষ সফল ট্রেড ক্লোজের টাইমস্ট্যাম্প
-    COOLDOWN_SECONDS = 300      # নতুন ট্রেড শুরুর আগে ৫ মিনিট (৩০০ সেকেন্ড) বিরতি
+    COOLDOWN_SECONDS = 60       # স্কাল্পিংয়ের জন্য মাত্র ১ মিনিট (৬০ সেকেন্ড) কুলডাউন
 
     while True:
         try:
-            # ১ মিনিট, ৩ মিনিট এবং ১৫ মিনিটের মোমবাতি (OHLCV) ডেটা সংগ্রহ
-            bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=200)
-            bars3 = exchange.fetch_ohlcv(SYMBOL, '3m', limit=200)
-            bars15 = exchange.fetch_ohlcv(SYMBOL, '15m', limit=100) # ১৫ মিনিটের ডেটা
+            # ১ মিনিট, ৩ মিনিট এবং ৫ মিনিটের মোমবাতি (OHLCV) ডেটা সংগ্রহ
+            bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=100)
+            bars3 = exchange.fetch_ohlcv(SYMBOL, '3m', limit=100)
+            bars5 = exchange.fetch_ohlcv(SYMBOL, '5m', limit=100) # দ্রুত ৫-মিনিটের ম্যাক্রো ফিল্টার
             
             df1 = pd.DataFrame(bars1, columns=['t', 'o', 'h', 'l', 'c', 'v'])
             df3 = pd.DataFrame(bars3, columns=['t', 'o', 'h', 'l', 'c', 'v'])
-            df15 = pd.DataFrame(bars15, columns=['t', 'o', 'h', 'l', 'c', 'v'])
+            df5 = pd.DataFrame(bars5, columns=['t', 'o', 'h', 'l', 'c', 'v'])
             
             p = df1['c'].iloc[-1]
             
-            # টেকনিক্যাল ইন্ডিকেটর গণনা (RSI, EMA, MACD, ADX)
-            r1 = ta.momentum.rsi(df1['c']).fillna(0).iloc[-1]
-            e20 = ta.trend.ema_indicator(df1['c'], 20).fillna(0).iloc[-1]
+            # ফাস্ট মোমেন্টাম টেকনিক্যাল ইন্ডিকেটর গণনা (RSI 9, EMA 9 & 21)
+            r1 = ta.momentum.rsi(df1['c'], window=9).fillna(0).iloc[-1] # ফাস্ট RSI (9)
+            e9 = ta.trend.ema_indicator(df1['c'], 9).fillna(0).iloc[-1]   # ফাস্ট EMA 9
+            e21 = ta.trend.ema_indicator(df1['c'], 21).fillna(0).iloc[-1] # ফাস্ট EMA 21
             
-            # ADX (ট্রেন্ড শক্তি মাপা)
-            adx_val = ta.trend.adx(df1['h'], df1['l'], df1['c'], window=14).fillna(0).iloc[-1]
-            
-            # ১৫-মিনিটের ম্যাক্রো ইএমএ ২০ (Macro Trend Filter)
-            e15_20 = ta.trend.ema_indicator(df15['c'], 20).fillna(0).iloc[-1]
+            # ৫-মিনিটের ম্যাক্রো ইএমএ ২০ (Macro Trend Filter)
+            e5_20 = ta.trend.ema_indicator(df5['c'], 20).fillna(0).iloc[-1]
             
             # ৩-মিনিটের ইন্ডিকেটর
             r3 = ta.momentum.rsi(df3['c']).fillna(0).iloc[-1]
@@ -210,35 +208,39 @@ def bot_engine():
             time_since_last_trade = time.time() - last_trade_time
             cooldown_over = time_since_last_trade >= COOLDOWN_SECONDS
 
-            # ১. ক্রয়ের লজিক (BUY Condition)
+            # ১. ক্রয়ের লজিক (BUY Condition - স্কাল্পিং উপযোগী)
             bull_signal = any(pt['t'] == 'bull' for pt in pats1) or any(pt['t'] == 'bull' for pt in pats3)
             
-            # নতুন কন্ডিশনস: ADX মান ২৩ এর উপরে (ট্রেন্ডিং মার্কেট) এবং ১৫-মিনিটে ম্যাক্রো আপট্রেন্ড
-            is_strongly_trending = adx_val > 23
-            macro_uptrend = p > e15_20
-            
-            can_buy = (p > e20 and 
-                       macro_uptrend and 
-                       is_strongly_trending and 
-                       (40 < r1 < 65) and 
-                       mv > ms and 
-                       bull_signal and 
-                       cooldown_over)
+            # শর্ত: মূল্য ইএমএ ৯ ও ২১ এর উপরে (বুলিশ ক্রসিং), ৫-মিনিটে আপট্রেন্ড, RSI মোমেন্টাম, বুলিশ ক্যান্ডেল ও কুলডাউন শেষ
+            macro_uptrend = p > e5_20
+            can_buy = (p > e9 and p > e21 and macro_uptrend and (45 < r1 < 68) and bull_signal and cooldown_over)
 
-            # ২. বিক্রয়ের লজিক (SELL / Exit Condition)
+            # ২. বিক্রয়ের লজিক (SELL / Exit Condition - আল্ট্রা ফাস্ট)
             bear_signal = any(pt['t'] == 'bear' for pt in pats3)
             
-            # স্মার্ট এক্সিট অপ্টিমাইজড: অতিরিক্ত প্যানিক সেল এড়াতে 
-            # RSI ৮০-এর বেশি হলে অথবা মূল্য EMA 20 এর নিচে নেমে সাথে বেয়ারিশ প্যাটার্ন থাকলে বিক্রি হবে
-            smart_sell = r1 > 80 or (p < e20 and bear_signal)
+            # ফাস্ট স্মার্ট এক্সিট: মূল্য যদি দ্রুতগতির EMA 9 এর নিচে নেমে যায় অথবা RSI ওভারবট (>৭৫) হয়
+            smart_sell = p < e9 or r1 > 75
 
             if in_pos:
-                # ট্রেইলিং স্টপ লস আপডেট করা
+                # ক. ব্রেক-ইভেন সুরক্ষাকবচ (Breakeven Protection)
+                # মূল্য কেনার দাম থেকে ০.১২% উপরে গেলেই স্টপ লসকে কেনার মূল্যে সেট করা হবে (নো-লস মোড)
+                breakeven_trigger = entry_p * 1.0012
+                if p >= breakeven_trigger and cur["sl_level"] < entry_p:
+                    cur.update({"sl_level": round(entry_p, 2)})
+                    cur["log"].insert(0, {
+                        "t": datetime.now().strftime("%H:%M"),
+                        "m": "🛡️ SL Breakeven-এ উন্নীত (ঝুঁকিমুক্ত ট্রেড)"
+                    })
+
+                # খ. ট্রেইলিং স্টপ লস আপডেট করা (যদি মূল্য আরও বাড়ে)
                 if p > peak_p:
                     peak_p = p
-                    cur.update({"sl_level": round(p * (1 - DEF_SL), 2)})
+                    # স্টপ লসকে সর্বোচ্চ মূল্যের ০.৩৫% নিচে ট্রেইল করবে
+                    new_sl = round(p * (1 - DEF_SL), 2)
+                    if new_sl > cur["sl_level"]:
+                        cur.update({"sl_level": new_sl})
 
-                # টার্গেট লাভ বা লস বা স্মার্ট সংকেত মিললে পজিশন থেকে প্রস্থান
+                # গ. টেক প্রফিট (০.২৫%), স্টপ লস (০.৩৫%) অথবা স্মার্ট সেল ট্রিগার হলে পজিশন ক্লোজ
                 if p >= cur["tp_level"] or p <= cur["sl_level"] or smart_sell:
                     in_pos = False
                     net_pnl += l_val
@@ -303,8 +305,8 @@ def bot_engine():
                 "entry_price": round(entry_p, 2),
                 "analysis_1m": {
                     "rsi": round(r1, 1),
-                    "ema": round(e20, 2),
-                    "sig": "বুলিশ ✅" if p > e20 else "বেয়ারিশ ❌",
+                    "ema": round(e9, 2),
+                    "sig": "বুলিশ ✅" if p > e9 else "বেয়ারিশ ❌",
                     "pats": pats1
                 },
                 "analysis_3m": {
@@ -321,20 +323,18 @@ def bot_engine():
             elif not cooldown_over:
                 remaining_seconds = int(COOLDOWN_SECONDS - time_since_last_trade)
                 cur["wait_reason"] = f"কুলডাউন ({remaining_seconds} সেকেন্ড বাকি)"
-            elif not is_strongly_trending:
-                cur["wait_reason"] = f"সাইডওয়েজ মার্কেট (ADX: {round(adx_val, 1)} - দুর্বল ট্রেন্ড)"
             elif not macro_uptrend:
-                cur["wait_reason"] = "ম্যাক্রো ডাউনট্রেন্ড (১৫-মিনিট চার্ট নিচে)"
+                cur["wait_reason"] = "৫-মিনিট ট্রেন্ড ডাউন (ম্যাক্রো বেয়ারিশ)"
             else:
-                cur["wait_reason"] = "প্যাটার্ন খুঁজছে..." if p > e20 else "ট্রেন্ড ডাউন"
+                cur["wait_reason"] = "স্কাল্পিং প্যাটার্ন খুঁজছে..." if p > e9 else "ট্রেন্ড ডাউন"
                 
             save_state(cur)
         except Exception as e:
-            # এক্সচেঞ্জ নেটওয়ার্ক বা যেকোনো সমস্যার লগ কনসোলে প্রিন্ট করা (ডিব্যাগ করার জন্য)
+            # এক্সচেঞ্জ নেটওয়ার্ক বা যেকোনো সমস্যার লগ কনসোলে প্রিন্ট করা
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot Engine Warning: {e}")
             
-        # ডাটা প্রতি ৩ সেকেন্ড পর পর আপডেট হবে
-        time.sleep(3)
+            # ডাটা প্রতি ৩ সেকেন্ড পর পর আপডেট হবে
+            time.sleep(3)
 
 
 # ব্যাকগ্রাউন্ড ট্রেডিং থ্রেড রান করা
@@ -424,7 +424,7 @@ UI = """
         </div>
         <div class="grid grid-cols-2 text-slate-500 font-medium">
             <span>RSI: <b id="r1">0</b></span>
-            <span>EMA 20: <b id="e1">0</b></span>
+            <span>EMA 9: <b id="e1">0</b></span>
         </div>
         <div id="pats1" class="mt-3 flex flex-wrap gap-1"></div>
     </div>
