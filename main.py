@@ -184,14 +184,29 @@ UI = """
                 } else { document.getElementById('pnl_display').classList.add('hidden'); }
                 
                 document.getElementById('r1').innerText = d.analysis_1m.rsi; document.getElementById('e1').innerText = '$' + d.analysis_1m.ema;
+                
+                // ১-মিনিট বিশ্লেষণ এর ডাইনামিক স্টাইল
                 const s1 = document.getElementById('s1'); s1.innerText = d.analysis_1m.sig;
-                s1.className = 'font-bold px-2 py-0.5 rounded ' + (d.analysis_1m.sig.includes('বুলিশ')?'bg-green-50 text-green-600':'bg-red-50 text-red-400');
+                if(d.analysis_1m.sig.includes('বুলিশ')) {
+                    s1.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-green-50 text-green-700 border border-green-200';
+                } else if(d.analysis_1m.sig.includes('বেয়ারিশ')) {
+                    s1.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-700 border border-red-200';
+                } else {
+                    s1.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
+                }
                 
                 document.getElementById('r3').innerText = d.analysis_3m.rsi; document.getElementById('m3').innerText = d.analysis_3m.macd;
+                
+                // ৩-মিনিট বিশ্লেষণ এর ডাইনামিক স্টাইল
                 const s3 = document.getElementById('s3'); s3.innerText = d.analysis_3m.sig;
-                s3.className = 'font-bold px-2 py-0.5 rounded ' + (d.analysis_3m.sig.includes('বুলিশ')?'bg-green-50 text-green-600':'bg-slate-50 text-slate-400');
+                if(d.analysis_3m.sig.includes('বুলিশ')) {
+                    s3.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-green-50 text-green-700 border border-green-200';
+                } else if(d.analysis_3m.sig.includes('বেয়ারিশ')) {
+                    s3.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-700 border border-red-200';
+                } else {
+                    s3.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
+                }
 
-                // প্যাটার্ন ডিসপ্লে আপডেট লজিক
                 const tag = (p) => `<span class="tag ${p.t==='bull'?'tag-bull':'tag-bear'}">${p.n}</span>`;
                 const no_pat = '<p class="text-gray-400 italic text-[10px]">কোনো ক্যান্ডেলস্টিক প্যাটার্ন নেই</p>';
                 
