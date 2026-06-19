@@ -328,7 +328,7 @@ def bot_engine():
             # এক্সচেঞ্জ নেটওয়ার্ক বা যেকোনো সমস্যার লগ কনসোলে প্রিন্ট করা (ডিব্যাগ করার জন্য)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot Engine Warning: {e}")
             
-        time.sleep(10)
+        time.sleep(3)
 
 
 # ব্যাকগ্রাউন্ড ট্রেডিং থ্রেড রান করা
