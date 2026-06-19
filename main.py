@@ -319,7 +319,7 @@ def bot_engine():
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot Engine Warning: {e}")
             
         # মাত্র ১টি এপিআই রিকোয়েস্ট হওয়ার কারণে ৩ সেকেন্ড লোড অত্যন্ত স্থিতিশীল
-        time.sleep(3)
+        time.sleep(1.5)
 
 
 # ব্যাকগ্রাউন্ড ট্রেডিং থ্রেড রান করা
@@ -577,7 +577,7 @@ UI = """
         } catch (e) {}
     }
     // প্রতি ৩ সেকেন্ড পর পর ড্যাশবোর্ড আপডেট হবে
-    setInterval(update, 3000); 
+    setInterval(update, 1.5000); 
     update();
 </script>
 </body>
