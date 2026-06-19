@@ -17,16 +17,16 @@ STATE_FILE = "bot_state.json"
 INITIAL_FUND = 100.0
 
 # স্কাল্পিং সেটিংস: অল্প প্রফিট টার্গেট এবং টাইট স্টপ লস
-DEF_TP = 0.0025  # ০.২৫% টেক প্রফিট (খুব দ্রুত লাভ বুক করবে)
-DEF_SL = 0.0035  # ০.৩৫% স্টপ লস (অল্পতে লস কাটবে)
+DEF_TP = 0.0025  # ০.২৫% টেক প্রফিট
+DEF_SL = 0.0035  # ০.৩৫% স্টপ লস
 
-# থ্রেড ক্ল্যাশ বা ফাইল লক সমস্যা এড়াতে গ্লোবাল থ্রেড লক
+# থ্রেড লক
 STATE_LOCK = threading.Lock()
 
-# এক্সচেঞ্জ কানেকশন (Bitget)
+# এক্সচেঞ্জ কানেকশন
 exchange = ccxt.bitget({'enableRateLimit': True})
 
-# ডিফল্ট স্টেট ডাটা স্ট্রাকচার
+# ডিফল্ট স্টেট
 DEFAULT_STATE = {
     "price": 0.0,
     "balance": INITIAL_FUND,
@@ -45,34 +45,44 @@ DEFAULT_STATE = {
     "tp_level": 0.0,
     "analysis_1m": {"rsi": 0, "ema": 0, "sig": "লোড হচ্ছে...", "pats": []},
     "analysis_3m": {"rsi": 0, "macd": 0, "sig": "লোড হচ্ছে...", "pats": []},
-    "analysis_5m": {"rsi": 0, "ema": 0, "sig": "লোড হচ্ছে...", "pats": []}, # ৫-মিনিটের নতুন এনালাইসিস স্টেট
+    "analysis_5m": {"rsi": 0, "ema": 0, "sig": "লোড হচ্ছে...", "pats": []},
     "wait_reason": "লোড হচ্ছে...",
     "log": [],
     "history": []
 }
 
+# ডিস্ক ল্যাগ এড়াতে মেমোরি ক্যাশ ভেরিয়েবল
+LAST_LOADED_TIME = 0
+CACHED_STATE = DEFAULT_STATE.copy()
+
 
 # =====================================================================
-# SECTION 2: থ্রেড-সেফ ফাইল ম্যানেজমেন্ট (State Management)
+# SECTION 2: অপ্টিমাইজড থ্রেড-সেফ ক্যাশ ফাইল ম্যানেজমেন্ট (No-Lag Disk Read)
 # =====================================================================
 def save_state(d):
-    """থ্রেড লক ব্যবহার করে নিরাপদভাবে ফাইল সেভ করে"""
+    """নিরাপদভাবে ফাইল সেভ করে"""
     with STATE_LOCK:
         try:
             with open(STATE_FILE, "w") as f:
-                json.dump(d, f, indent=4)
+                json.dump(d, f)
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error saving state: {e}")
 
 
 def load_state():
-    """থ্রেড লক ব্যবহার করে নিরাপদভাবে ফাইল লোড করে"""
+    """ফাইল মডিফিকেশন চেক করে ক্যাশ থেকে ইনস্ট্যান্ট লোড করে (Disk I/O ল্যাগ দূর করতে)"""
+    global LAST_LOADED_TIME, CACHED_STATE
     with STATE_LOCK:
         if not os.path.exists(STATE_FILE):
             return DEFAULT_STATE.copy()
         try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
+            mtime = os.path.getmtime(STATE_FILE)
+            # ফাইলের ডাটা নতুন করে রাইট না হওয়া পর্যন্ত ডিস্ক রিড না করে সরাসরি মেমোরি ক্যাশ রিটার্ন করবে
+            if mtime > LAST_LOADED_TIME:
+                with open(STATE_FILE, "r") as f:
+                    CACHED_STATE = json.load(f)
+                LAST_LOADED_TIME = mtime
+            return CACHED_STATE.copy()
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error loading state: {e}")
             return DEFAULT_STATE.copy()
@@ -83,16 +93,13 @@ app = Flask(__name__)
 
 
 # =====================================================================
-# SECTION 3: ১৭টি শক্তিশালী ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
+# SECTION 3: ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
 # =====================================================================
 def get_advanced_pats(df):
-    """১৭টি শক্তিশালী ক্যান্ডেলস্টিক প্যাটার্ন সনাক্ত করার জন্য গাণিতিক লজিক"""
     p = []
     if len(df) < 5:
         return p
-        
     c1, c2, c3 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-    
     def info(c):
         body = abs(c['c'] - c['o'])
         total = max(0.001, c['h'] - c['l'])
@@ -105,78 +112,53 @@ def get_advanced_pats(df):
     b2, t2, u2, l2, g2 = info(c2)
     b3, t3, u3, l3, g3 = info(c3)
 
-    # --- বুলিশ প্যাটার্নস (BUY সিগন্যাল) ---
-    if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1:
-        p.append({"n": "হ্যামার 🔨", "t": "bull"})
-        
-    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and g1:
-        p.append({"n": "ইনভার্টেড হ্যামার 🔨", "t": "bull"})
-        
-    if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']:
-        p.append({"n": "বুলিশ এনগালফিং 📈", "t": "bull"})
-        
-    if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2:
-        p.append({"n": "মর্নিং স্টার 🌅", "t": "bull"})
-        
-    if b1 / t1 > 0.85 and g1:
-        p.append({"n": "বুলিশ মারুবোজু 💪", "t": "bull"})
-        
-    if not g2 and g1 and c1['o'] < c2['c'] and c1['c'] > (c2['o'] + c2['c']) / 2 and c1['c'] < c2['o']:
-        p.append({"n": "পিয়ার্সিং লাইন ⚡", "t": "bull"})
-        
-    if not g2 and g1& c1['c'] < c2['o'] and c1['o'] > c2['c'] and b1 < b2:
-        p.append({"n": "বুলিশ হারামি 🤰", "t": "bull"})
-        
-    if g1 and g2 and g3 and c1['c'] > c2['c'] and c2['c'] > c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2:
-        p.append({"n": "থ্রি হোয়াইট সোলজার্স 💂‍♂️", "t": "bull"})
-        
-    if abs(c1['l'] - c2['l']) / max(0.001, c1['l']) < 0.001 and not g2 and g1:
-        p.append({"n": "টুইজার বটম 🧲", "t": "bull"})
+    if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1: p.append({"n": "হ্যামার 🔨", "t": "bull"})
+    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and g1: p.append({"n": "ইনভার্টেড হ্যামার 🔨", "t": "bull"})
+    if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']: p.append({"n": "বুলিশ এনগালফিং 📈", "t": "bull"})
+    if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2: p.append({"n": "মর্নিং স্টার 🌅", "t": "bull"})
+    if b1 / t1 > 0.85 and g1: p.append({"n": "বুলিশ মারুবোজু 💪", "t": "bull"})
+    if not g2 and g1 and c1['o'] < c2['c'] and c1['c'] > (c2['o'] + c2['c']) / 2 and c1['c'] < c2['o']: p.append({"n": "পিয়ার্সিং লাইন ⚡", "t": "bull"})
+    if not g2 and g1 and c1['c'] < c2['o'] and c1['o'] > c2['c'] and b1 < b2: p.append({"n": "বুলিশ হারামি 🤰", "t": "bull"})
+    if g1 and g2 and g3 and c1['c'] > c2['c'] and c2['c'] > c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2: p.append({"n": "থ্রি হোয়াইট সোলজার্স 💂‍♂️", "t": "bull"})
+    if abs(c1['l'] - c2['l']) / max(0.001, c1['l']) < 0.001 and not g2 and g1: p.append({"n": "টুইজার বটম 🧲", "t": "bull"})
 
-    # --- বেয়ারিশ প্যাটার্নস (SELL সিগন্যাল) ---
-    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and not g1:
-        p.append({"n": "শুটিং স্টার ☄️", "t": "bear"})
-        
-    if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1 and not g1:
-        p.append({"n": "হ্যাঙ্গিং ম্যান 🕴️", "t": "bear"})
-        
-    if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']:
-        p.append({"n": "বেয়ারিশ এনগালফিং 📉", "t": "bear"})
-        
-    if g3 and b2 < (b3 * 0.3) and not g1& c1['c'] < (c3['o'] + c3['c']) / 2:
-        p.append({"n": "ইভনিং স্টার 🌅", "t": "bear"})
-        
-    if b1 / t1 > 0.85 and not g1:
-        p.append({"n": "বেয়ারিশ মারুবোজু 🔴", "t": "bear"})
-        
-    if g2 and not g1 and c1['o'] > c2['c'] and c1['c'] < (c2['o'] + c2['c']) / 2 and c1['c'] > c2['o']:
-        p.append({"n": "ডার্ক ক্লাউড কভার ⛈️", "t": "bear"})
-        
-    if g2 and not g1 and c1['c'] > c2['o'] and c1['o'] < c2['c'] and b1 < b2:
-        p.append({"n": "বেয়ারিশ হারামি 🤰", "t": "bear"})
-        
-    if not g1 and not g2 and not g3 and c1['c'] < c2['c'] and c2['c'] < c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2:
-        p.append({"n": "থ্রি ব্ল্যাক ক্রোস 🐦", "t": "bear"})
-
+    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and not g1: p.append({"n": "শুটিং স্টার ☄️", "t": "bear"})
+    if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1 and not g1: p.append({"n": "হ্যাঙ্গিং ম্যান 🕴️", "t": "bear"})
+    if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']: p.append({"n": "বেয়ারিশ এনগালফিং 📉", "t": "bear"})
+    if g3 and b2 < (b3 * 0.3) and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2: p.append({"n": "ইভনিং স্টার 🌅", "t": "bear"})
+    if b1 / t1 > 0.85 and not g1: p.append({"n": "বেয়ারিশ মারুবোজু 🔴", "t": "bear"})
+    if g2 and not g1 and c1['o'] > c2['c'] and c1['c'] < (c2['o'] + c2['c']) / 2 and c1['c'] > c2['o']: p.append({"n": "ডার্ক ক্লাউড কভার ⛈️", "t": "bear"})
+    if g2 and not g1 and c1['c'] > c2['o'] and c1['o'] < c2['c'] and b1 < b2: p.append({"n": "বেয়ারিশ হারামি 🤰", "t": "bear"})
+    if not g1 and not g2 and not g3 and c1['c'] < c2['c'] and c2['c'] < c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2: p.append({"n": "থ্রি ব্ল্যাক ক্রোস 🐦", "t": "bear"})
     return p
 
 
 # =====================================================================
-# SECTION 4: মূল স্কাল্পিং বট ইঞ্জিন লজিক (৩ সেকেন্ড আপডেট সহ)
+# SECTION 4: মূল স্কাল্পিং বট ইঞ্জিন লজিক (আল্ট্রা-ফাস্ট নেটওয়ার্ক অপ্টিমাইজড)
 # =====================================================================
 def bot_engine():
     wins, total, net_pnl, pnl_hist = 0, 0, 0.0, [0]
     in_pos, entry_p, peak_p = False, 0.0, 0.0
     
     last_trade_time = 0         # শেষ সফল ট্রেড ক্লোজের টাইমস্ট্যাম্প
-    COOLDOWN_SECONDS = 60       # স্কাল্পিংয়ের জন্য মাত্র ১ মিনিট (৬০ সেকেন্ড) কুলডাউন
+    COOLDOWN_SECONDS = 60       # স্কাল্পিংয়ের জন্য মাত্র ১ মিনিট কুলডাউন
+    
+    # এপিআই ট্রাফিক ও নেটওয়ার্ক ল্যাগ এড়াতে ওএইচএলসিভি ক্যাশ ভেরিয়েবল
+    bars3 = []
+    bars5 = []
+    last_fetch_3m_5m = 0
 
     while True:
         try:
-            # ১ মিনিট, ৩ মিনিট এবং ৫ মিনিটের মোমবাতি (OHLCV) ডেটা সংগ্রহ
+            # ১ মিনিটের ফাস্ট লাইভ ডাটা প্রতি লুপে রিকোয়েস্ট হবে
             bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=100)
-            bars3 = exchange.fetch_ohlcv(SYMBOL, '3m', limit=100)
-            bars5 = exchange.fetch_ohlcv(SYMBOL, '5m', limit=100) # দ্রুত ৫-মিনিটের ম্যাক্রো ফিল্টার
+            
+            # ৩ এবং ৫ মিনিটের ডাটা প্রতি ৩০ সেকেন্ডে ক্যাশ থেকে আপডেট হবে (এপিআই ল্যাগ বা জ্যাম এড়াতে)
+            now = time.time()
+            if now - last_fetch_3m_5m > 30 or not bars3 or not bars5:
+                bars3 = exchange.fetch_ohlcv(SYMBOL, '3m', limit=100)
+                bars5 = exchange.fetch_ohlcv(SYMBOL, '5m', limit=100)
+                last_fetch_3m_5m = now
             
             df1 = pd.DataFrame(bars1, columns=['t', 'o', 'h', 'l', 'c', 'v'])
             df3 = pd.DataFrame(bars3, columns=['t', 'o', 'h', 'l', 'c', 'v'])
@@ -184,12 +166,12 @@ def bot_engine():
             
             p = df1['c'].iloc[-1]
             
-            # ফাস্ট মোমেন্টাম টেকনিক্যাল ইন্ডিকেটর গণনা (RSI 9, EMA 9 & 21)
-            r1 = ta.momentum.rsi(df1['c'], window=9).fillna(0).iloc[-1] # ফাস্ট RSI (9)
-            e9 = ta.trend.ema_indicator(df1['c'], 9).fillna(0).iloc[-1]   # ফাস্ট EMA 9
-            e21 = ta.trend.ema_indicator(df1['c'], 21).fillna(0).iloc[-1] # ফাস্ট EMA 21
+            # ফাস্ট মোমেন্টাম টেকনিক্যাল ইন্ডিকেটর গণনা
+            r1 = ta.momentum.rsi(df1['c'], window=9).fillna(0).iloc[-1]
+            e9 = ta.trend.ema_indicator(df1['c'], 9).fillna(0).iloc[-1]
+            e21 = ta.trend.ema_indicator(df1['c'], 21).fillna(0).iloc[-1]
             
-            # ৫-মিনিটের ইন্ডিকেটর (RSI, EMA 20, Patterns)
+            # ৫-মিনিটের ইন্ডিকেটর
             r5 = ta.momentum.rsi(df5['c']).fillna(0).iloc[-1]
             e5_20 = ta.trend.ema_indicator(df5['c'], 20).fillna(0).iloc[-1]
             
@@ -201,11 +183,11 @@ def bot_engine():
             
             pats1 = get_advanced_pats(df1)
             pats3 = get_advanced_pats(df3)
-            pats5 = get_advanced_pats(df5) # ৫ মিনিটের নতুন ক্যান্ডেলস্টিক প্যাটার্ন
+            pats5 = get_advanced_pats(df5)
             
             cur = load_state()
             
-            # ওল্ড স্টেট ফাইলে নতুন কোনো ফিল্ড না থাকলে তা ডিফেন্সিভলি ডিফল্ট থেকে যোগ করা
+            # ওল্ড স্টেট ফাইল মার্জ করা
             for k, v in DEFAULT_STATE.items():
                 if k not in cur:
                     cur[k] = v
@@ -217,46 +199,36 @@ def bot_engine():
             time_since_last_trade = time.time() - last_trade_time
             cooldown_over = time_since_last_trade >= COOLDOWN_SECONDS
 
-            # ১. ক্রয়ের লজিক (BUY Condition - স্কাল্পিং উপযোগী)
+            # ১. ক্রয়ের লজিক (BUY Condition)
             bull_signal = any(pt['t'] == 'bull' for pt in pats1) or any(pt['t'] == 'bull' for pt in pats3)
-            
-            # শর্ত: মূল্য ইএমএ ৯ ও ২১ এর উপরে (বুলিশ ক্রসিং), ৫-মিনিটে আপট্রেন্ড, RSI মোমেন্টাম, বুলিশ ক্যান্ডেল ও কুলডাউন শেষ
             macro_uptrend = p > e5_20
             can_buy = (p > e9 and p > e21 and macro_uptrend and (45 < r1 < 68) and bull_signal and cooldown_over)
 
-            # ২. বিক্রয়ের লজিক (SELL / Exit Condition - আল্ট্রা ফাস্ট)
+            # ২. বিক্রয়ের লজিক (SELL / Exit Condition)
             bear_signal = any(pt['t'] == 'bear' for pt in pats3)
-            
-            # ফাস্ট স্মার্ট এক্সিট: মূল্য যদি দ্রুতগতির EMA 9 এর নিচে নেমে যায় অথবা RSI ওভারবট (>৭৫) হয়
             smart_sell = p < e9 or r1 > 75
 
             if in_pos:
                 # ক. ব্রেক-ইভেন সুরক্ষাকবচ (Breakeven Protection)
-                # মূল্য কেনার দাম থেকে ০.১২% উপরে গেলেই স্টপ লসকে কেনার মূল্যে সেট করা হবে (নো-লস মোড)
                 breakeven_trigger = entry_p * 1.0012
                 if p >= breakeven_trigger and cur["sl_level"] < entry_p:
                     cur.update({"sl_level": round(entry_p, 2)})
-                    cur["log"].insert(0, {
-                        "t": datetime.now().strftime("%H:%M"),
-                        "m": "🛡️ SL Breakeven-এ উন্নীত (ঝুঁকিমুক্ত ট্রেড)"
-                    })
+                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": "🛡️ SL Breakeven-এ উন্নীত (ঝুঁকিমুক্ত ট্রেড)"})
 
-                # খ. ট্রেইলিং স্টপ লস আপডেট করা (যদি মূল্য আরও বাড়ে)
+                # খ. ট্রেইলিং স্টপ লস আপডেট করা
                 if p > peak_p:
                     peak_p = p
-                    # স্টপ লসকে সর্বোচ্চ মূল্যের ০.৩৫% নিচে ট্রেইল করবে
                     new_sl = round(p * (1 - DEF_SL), 2)
                     if new_sl > cur["sl_level"]:
                         cur.update({"sl_level": new_sl})
 
-                # গ. টেক প্রফিট (০.২৫%), স্টপ লস (০.৩৫%) অথবা স্মার্ট সেল ট্রিগার হলে পজিশন ক্লোজ
+                # গ. টেক প্রফিট, স্টপ লস অথবা স্মার্ট সেল ট্রিগার হলে পজিশন ক্লোজ
                 if p >= cur["tp_level"] or p <= cur["sl_level"] or smart_sell:
                     in_pos = False
                     net_pnl += l_val
                     pnl_hist.append(net_pnl)
                     
-                    if p > entry_p:
-                        wins += 1
+                    if p > entry_p: wins += 1
                         
                     cur.update({
                         "balance": round(100.0 + net_pnl, 2),
@@ -265,21 +237,11 @@ def bot_engine():
                         "best": round(max(pnl_hist), 2),
                         "last_action": "SELL"
                     })
-                    cur["history"].insert(0, {
-                        "t": datetime.now().strftime("%H:%M"),
-                        "a": "SELL",
-                        "p": round(p, 2),
-                        "r": f"{round(l_pnl, 2)}%"
-                    })
-                    cur["log"].insert(0, {
-                        "t": datetime.now().strftime("%H:%M"),
-                        "m": f"🔴 SELL @ ${p:.2f} ({'Smart Exit' if smart_sell else 'Target'})"
-                    })
+                    cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "SELL", "p": round(p, 2), "r": f"{round(l_pnl, 2)}%"})
+                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🔴 SELL @ ${p:.2f} ({'Smart Exit' if smart_sell else 'Target'})"})
                     
-                    # বিক্রি সম্পন্ন হওয়ার পর কুলডাউন কাউন্টডাউন শুরু করা
                     last_trade_time = time.time()
             else:
-                # ক্রয়ের সিদ্ধান্ত কার্যকর
                 if can_buy:
                     entry_p = p
                     peak_p = p
@@ -293,18 +255,10 @@ def bot_engine():
                         "tp_level": round(p * (1 + DEF_TP), 2),
                         "last_action": "BUY"
                     })
-                    cur["history"].insert(0, {
-                        "t": datetime.now().strftime("%H:%M"),
-                        "a": "BUY",
-                        "p": round(p, 2),
-                        "r": "---"
-                    })
-                    cur["log"].insert(0, {
-                        "t": datetime.now().strftime("%H:%M"),
-                        "m": f"🟢 BUY @ ${p:.2f} (Prediction Confirmed)"
-                    })
+                    cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "BUY", "p": round(p, 2), "r": "---"})
+                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🟢 BUY @ ${p:.2f} (Prediction Confirmed)"})
             
-            # সিগন্যালসমূহ বাংলা ও ইমোজি দিয়ে ফরম্যাট করে স্টেট ফাইলে আপডেট করা
+            # স্টেট ফাইলে আপডেট করা
             cur.update({
                 "price": round(p, 2),
                 "last_update": datetime.now(timezone.utc).strftime("%H:%M:%S"),
@@ -345,11 +299,9 @@ def bot_engine():
                 
             save_state(cur)
         except Exception as e:
-            # এক্সচেঞ্জ নেটওয়ার্ক বা যেকোনো সমস্যার লগ কনসোলে প্রিন্ট করা
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot Engine Warning: {e}")
             
-        # ডাটা প্রতি ৩ সেকেন্ড পর পর আপডেট হবে
-        time.sleep(5)
+        time.sleep(3)
 
 
 # ব্যাকগ্রাউন্ড ট্রেডিং থ্রেড রান করা
@@ -357,11 +309,11 @@ threading.Thread(target=bot_engine, daemon=True).start()
 
 
 # =====================================================================
-# SECTION 5: Flask ওয়েব সার্ভার এবং এপিআই রাউটস
+# SECTION 5: Flask ওয়েব সার্ভার এবং এপিআই রাউটস (High Performance)
 # =====================================================================
 @app.route('/api/data')
 def api():
-    """বটের বর্তমান তথ্য JSON ফরম্যাটে প্রদান করে (থ্রেড সেফ)"""
+    """মেমোরি ক্যাশ থেকে ইনস্ট্যান্ট ডাটা ড্যাশবোর্ডে পাঠায় (০ মিলি-সেকেন্ড ল্যাগ)"""
     return jsonify(load_state())
 
 
@@ -457,7 +409,7 @@ UI = """
         <div id="pats3" class="mt-3 flex flex-wrap gap-1"></div>
     </div>
 
-    <!-- ৫ মিনিট বিশ্লেষণ প্যানেল (নতুন যুক্ত করা হয়েছে) -->
+    <!-- ৫ মিনিট বিশ্লেষণ প্যানেল -->
     <div class="card p-4 mb-4 text-[11px]">
         <div class="flex justify-between mb-3 items-center">
             <h3 class="font-bold text-slate-700 text-xs">&#128202; 5 মিনিট বিশ্লেষণ</h3>
@@ -564,7 +516,7 @@ UI = """
                     s3.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
                 }
 
-                // ৫ মিনিট সিগন্যাল ডাইনামিক স্টাইল (নতুন যুক্ত করা হয়েছে)
+                // ৫ মিনিট সিগন্যাল ডাইনামিক স্টাইল
                 document.getElementById('r5').innerText = d.analysis_5m.rsi; 
                 document.getElementById('e5').innerText = '$' + d.analysis_5m.ema;
                 
@@ -607,7 +559,7 @@ UI = """
         } catch (e) {}
     }
     // প্রতি ৩ সেকেন্ড পর পর ড্যাশবোর্ড আপডেট হবে
-    setInterval(update, 5000); 
+    setInterval(update, 3000); 
     update();
 </script>
 </body>
