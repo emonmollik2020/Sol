@@ -361,7 +361,6 @@ UI = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Master SOL Bot</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>setInterval(() => location.reload(), 600000);</script>
     <style>
         body { background-color: #f8fafc; font-family: 'Segoe UI', sans-serif; }
         .card { background: white; border-radius: 1rem; border: 1px solid #f1f5f9; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
