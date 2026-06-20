@@ -11,14 +11,18 @@ import os
 from flask import Flask, render_template_string, jsonify
 from datetime import datetime, timezone
 
-# ট্রেডিং পেয়ার এবং ফাইলের সেটিংস
-SYMBOL = "SOL/USDT"
+# ফিউচার্স পেয়ার (USDT-Margined Perpetual Contract) এবং সেটিংস
+SYMBOL = "SOL/USDT:USDT"
 STATE_FILE = "bot_state.json"
 INITIAL_FUND = 100.0
 
-# স্কাল্পিং সেটিংস: অল্প প্রফিট টার্গেট এবং টাইট স্টপ লস
-DEF_TP = 0.0020  # ০.২০% টেক প্রফিট
-DEF_SL = 0.0035  # ০.৩৫% স্টপ লস
+# ১০x লিভারেজ এবং প্রফেশনাল রিস্ক পার্সেন্টেজ
+LEVERAGE = 10
+RISK_FRACTION = 0.02 # প্রতিটি ট্রেডে মোট ফান্ডের সর্বোচ্চ ২% রিস্ক নেবে
+
+# সুইং ও ট্রেন্ড ট্রেডিংয়ের জন্য স্ট্যান্ডার্ড স্টপ লস ও টেক প্রফিট (ডাইনামিক এটিআর দিয়ে এটি পরিবর্তিত হবে)
+DEF_TP = 0.035  
+DEF_SL = 0.020  
 
 # থ্রেড লক
 STATE_LOCK = threading.Lock()
@@ -26,7 +30,7 @@ STATE_LOCK = threading.Lock()
 # এক্সচেঞ্জ কানেকশন
 exchange = ccxt.bitget({'enableRateLimit': True})
 
-# ডিফল্ট স্টেট
+# ডিফল্ট স্টেট (উভয়মুখী ফিউচার্স ১০x লিভারেজ মডেল অনুযায়ী সাজানো)
 DEFAULT_STATE = {
     "price": 0.0,
     "balance": INITIAL_FUND,
@@ -38,14 +42,18 @@ DEFAULT_STATE = {
     "worst": 0.0,
     "last_action": "---",
     "in_position": False,
+    "position_type": "NONE", # "LONG", "SHORT", "NONE"
+    "peak_p": 0.0,            # LONG এর জন্য ট্রেইলিং ট্র্যাক
+    "valley_p": 0.0,          # SHORT এর জন্য ট্রেইলিং ট্র্যাক
     "live_pnl_pct": 0.0,
     "live_pnl_val": 0.0,
     "entry_price": 0.0,
     "sl_level": 0.0,
     "tp_level": 0.0,
-    "analysis_1m": {"rsi": 0, "ema": 0, "sig": "লোড হচ্ছে...", "pats": []},
-    "analysis_3m": {"rsi": 0, "macd": 0, "sig": "লোড হচ্ছে...", "pats": []},
-    "analysis_5m": {"rsi": 0, "ema": 0, "sig": "লোড হচ্ছে...", "pats": []},
+    "pos_size": 0.0,  
+    "margin": 0.0,    
+    "analysis_15m": {"rsi": 0, "ema20": 0, "ema50": 0, "vwap": 0, "sig": "লোড হচ্ছে...", "pats": []},
+    "analysis_1h": {"rsi": 0, "ema200": 0, "btc_price": 0, "sig": "লোড হচ্ছে...", "pats": []},
     "wait_reason": "লোড হচ্ছে...",
     "log": [],
     "history": []
@@ -70,14 +78,13 @@ def save_state(d):
 
 
 def load_state():
-    """ফাইল মডিফিকেশন চেক করে ক্যাশ থেকে ইনস্ট্যান্ট লোড করে (Disk I/O ল্যাগ দূর করতে)"""
+    """ফাইল মডিফিকেশন চেক করে ক্যাশ থেকে ইনস্ট্যান্ট লোড করে"""
     global LAST_LOADED_TIME, CACHED_STATE
     with STATE_LOCK:
         if not os.path.exists(STATE_FILE):
             return DEFAULT_STATE.copy()
         try:
             mtime = os.path.getmtime(STATE_FILE)
-            # ফাইলের ডাটা নতুন করে রাইট না হওয়া পর্যন্ত ডিস্ক রিড না করে সরাসরি মেমোরি ক্যাশ রিটার্ন করবে
             if mtime > LAST_LOADED_TIME:
                 with open(STATE_FILE, "r") as f:
                     CACHED_STATE = json.load(f)
@@ -93,7 +100,7 @@ app = Flask(__name__)
 
 
 # =====================================================================
-# SECTION 3: ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
+# SECTION 3: ১৭টি শক্তিশালী ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
 # =====================================================================
 def get_advanced_pats(df):
     p = []
@@ -112,6 +119,7 @@ def get_advanced_pats(df):
     b2, t2, u2, l2, g2 = info(c2)
     b3, t3, u3, l3, g3 = info(c3)
 
+    # --- বুলিশ প্যাটার্নস (LONG সিগন্যাল) ---
     if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1: p.append({"n": "হ্যামার 🔨", "t": "bull"})
     if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and g1: p.append({"n": "ইনভার্টেড হ্যামার 🔨", "t": "bull"})
     if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']: p.append({"n": "বুলিশ এনগালফিং 📈", "t": "bull"})
@@ -122,6 +130,7 @@ def get_advanced_pats(df):
     if g1 and g2 and g3 and c1['c'] > c2['c'] and c2['c'] > c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2: p.append({"n": "থ্রি হোয়াইট সোলজার্স 💂‍♂️", "t": "bull"})
     if abs(c1['l'] - c2['l']) / max(0.001, c1['l']) < 0.001 and not g2 and g1: p.append({"n": "টুইজার বটম 🧲", "t": "bull"})
 
+    # --- বেয়ারিশ প্যাটার্নস (SHORT সিগন্যাল) ---
     if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and not g1: p.append({"n": "শুটিং স্টার ☄️", "t": "bear"})
     if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1 and not g1: p.append({"n": "হ্যাঙ্গিং ম্যান 🕴️", "t": "bear"})
     if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']: p.append({"n": "বেয়ারিশ এনগালফিং 📉", "t": "bear"})
@@ -134,30 +143,47 @@ def get_advanced_pats(df):
 
 
 # =====================================================================
-# SECTION 4: মূল স্কাল্পিং বট ইঞ্জিন লজিক (রিস্যাম্পলিং টেকনিক)
+# SECTION 4: টু-ওয়ে (Two-Way) ফিউচার্স ট্রেডিং বট ইঞ্জিন (১০x লিভারেজ)
 # =====================================================================
 def bot_engine():
     wins, total, net_pnl, pnl_hist = 0, 0, 0.0, [0]
-    in_pos, entry_p, peak_p = False, 0.0, 0.0
+    in_pos, entry_p = False, 0.0
+    pos_size_usd, margin_usd = 0.0, 0.0
     
-    last_trade_time = 0         # শেষ সফল ট্রেড ক্লোজের টাইমস্ট্যাম্প
-    COOLDOWN_SECONDS = 60       # স্কাল্পিংয়ের জন্য মাত্র ১ মিনিট কুলডাউন
+    # সার্ভার রিস্টার্টের পরও যেন ট্রেড হারিয়ে না যায়, সেজন্য ফাইল ট্র্যাক
+    cur_init = load_state()
+    position_type = cur_init.get("position_type", "NONE")
+    peak_p = cur_init.get("peak_p", 0.0)
+    valley_p = cur_init.get("valley_p", 0.0)
+    
+    last_trade_time = 0         
+    COOLDOWN_SECONDS = 900      # ট্রেন্ড ক্লোজ হওয়ার পর ১৫ মিনিট বিরতি
 
     while True:
         try:
-            # ১ মিনিটের ডাটা রিকোয়েস্ট (লিমিট ৩০০টি ক্যান্ডেল, যা থেকে ৩ ও ৫ মিনিট তৈরি হবে)
-            # এটি এক্সচেঞ্জে ৩টির জায়গায় মাত্র ১টি রিকোয়েস্ট পাঠাবে (সম্পূর্ণ নো-ল্যাগ)
-            bars1 = exchange.fetch_ohlcv(SYMBOL, '1m', limit=300)
+            # ১৫ মিনিটের ক্যান্ডেলস্টিক ডাটা সংগ্রহ (লিমিট ১০০০)
+            bars15 = exchange.fetch_ohlcv(SYMBOL, '15m', limit=1000)
+            df15 = pd.DataFrame(bars15, columns=['t', 'o', 'h', 'l', 'c', 'v'])
             
-            # ১ মিনিটের অরিজিনাল ডাটাফ্রেম তৈরি করা
-            df1 = pd.DataFrame(bars1, columns=['t', 'o', 'h', 'l', 'c', 'v'])
+            # ১. বিটকয়েন (BTC/USDT) ১৫ মিনিটের ডাটা সংগ্রহ করা (Correlation Filter)
+            bars_btc = exchange.fetch_ohlcv("BTC/USDT", '15m', limit=50)
+            df_btc = pd.DataFrame(bars_btc, columns=['t', 'o', 'h', 'l', 'c', 'v'])
             
-            # ডেটটাইম ইনডেক্স সেট করা (রিস্যাম্পলিং বা মোমবাতি জোড়া দেওয়ার জন্য)
-            df1['dt'] = pd.to_datetime(df1['t'], unit='ms')
-            df1.set_index('dt', inplace=True)
+            # ২. বিটগেট লাইভ অর্ডার বুক সংগ্রহ করা ( bids/asks ইমব্যালেন্স ফিল্টার)
+            ob = exchange.fetch_order_book(SYMBOL, limit=10)
+            total_bids = sum([bid[1] for bid in ob['bids'][:10]])
+            total_asks = sum([ask[1] for ask in ob['asks'][:10]])
             
-            # মেমোরির ভেতরেই ১-মিনিটের ডাটা থেকে ৩-মিনিটের চার্ট তৈরি করা
-            df3 = df1.resample('3min').agg({
+            # লং এবং শর্ট অর্ডার ইমব্যালেন্স আলাদা হিসাব
+            ob_imbalance_long = total_bids / max(0.001, total_asks) > 1.15
+            ob_imbalance_short = total_asks / max(0.001, total_bids) > 1.15
+            
+            # ডেটটাইম ইনডেক্স সেট করা (রিস্যাম্পলিংয়ের জন্য)
+            df15['dt'] = pd.to_datetime(df15['t'], unit='ms')
+            df15.set_index('dt', inplace=True)
+            
+            # ১৫-মিনিটের ডাটা জোড়া দিয়ে মেমোরিতে ১-ঘণ্টার চার্ট তৈরি করা
+            df1h = df15.resample('1h').agg({
                 't': 'first',
                 'o': 'first',
                 'h': 'max',
@@ -165,164 +191,314 @@ def bot_engine():
                 'c': 'last',
                 'v': 'sum'
             }).dropna()
-            df3.reset_index(drop=True, inplace=True)
+            df1h.reset_index(drop=True, inplace=True)
+            df15.reset_index(drop=True, inplace=True)
             
-            # মেমোরির ভেতরেই ১-মিনিটের ডাটা থেকে ৫-মিনিটের চার্ট তৈরি করা
-            df5 = df1.resample('5min').agg({
-                't': 'first',
-                'o': 'first',
-                'h': 'max',
-                'l': 'min',
-                'c': 'last',
-                'v': 'sum'
-            }).dropna()
-            df5.reset_index(drop=True, inplace=True)
+            p = df15['c'].iloc[-1]
             
-            # ১-মিনিটের অরিজিনাল ডাটাফ্রেমের ইনডেক্স স্বাভাবিক করা
-            df1.reset_index(drop=True, inplace=True)
+            # ৩. বিটকয়েন কোরিলেশন হিসাব
+            btc_p = df_btc['c'].iloc[-1]
+            btc_e20 = ta.trend.ema_indicator(df_btc['c'], 20).fillna(0).iloc[-1]
+            btc_bullish = btc_p > btc_e20  # BTC আপট্রেন্ড (LONG এর জন্য)
+            btc_bearish = btc_p < btc_e20  # BTC ডাউনট্রেন্ড (SHORT এর জন্য)
             
-            p = df1['c'].iloc[-1]
+            # ৪. ১৫-মিনিটের ভলিউম ব্রেকআউট ফিল্টার হিসাব করা (Volume Confirmation)
+            sol_vol_ma = df15['v'].rolling(window=15).mean().fillna(0).iloc[-1]
+            sol_current_vol = df15['v'].iloc[-1]
+            volume_confirmed = sol_current_vol > (1.2 * sol_vol_ma)
             
-            # ফাস্ট মোমেন্টাম টেকনিক্যাল ইন্ডিকেটর গণনা
-            r1 = ta.momentum.rsi(df1['c'], window=9).fillna(0).iloc[-1]
-            e9 = ta.trend.ema_indicator(df1['c'], 9).fillna(0).iloc[-1]
-            e21 = ta.trend.ema_indicator(df1['c'], 21).fillna(0).iloc[-1]
+            # ৫. ১৫-মিনিট চার্টের VWAP ফিল্টার হিসাব করা (Institutional Filter)
+            vwap_series = ta.volume.volume_weighted_average_price(high=df15['h'], low=df15['l'], close=df15['c'], volume=df15['v'], window=14)
+            vwap = vwap_series.fillna(0).iloc[-1]
+            vwap_long_confirmed = p > vwap   # মূল্য VWAP এর ওপরে (LONG)
+            vwap_short_confirmed = p < vwap  # মূল্য VWAP এর নিচে (SHORT)
             
-            # ৫-মিনিটের ইন্ডিকেটর
-            r5 = ta.momentum.rsi(df5['c']).fillna(0).iloc[-1]
-            e5_20 = ta.trend.ema_indicator(df5['c'], 20).fillna(0).iloc[-1]
+            # ৬. এটিআর-ভিত্তিক ডাইনামিক লাভ ও লোকসান গণনা (ATR-based Dynamic TP/SL)
+            atr = ta.volatility.average_true_range(high=df15['h'], low=df15['l'], close=df15['c'], window=14).fillna(0).iloc[-1]
+            atr_pct = atr / p
+            dynamic_tp_pct = max(0.015, min(0.060, 2.5 * atr_pct))  # ২.৫ গুণ ATR, লাভ টার্গেট
+            dynamic_sl_pct = max(0.010, min(0.035, 1.5 * atr_pct))  # ১.৫ গুণ ATR, লস টার্গেট
             
-            # ৩-মিনিটের ইন্ডিকেটর
-            r3 = ta.momentum.rsi(df3['c']).fillna(0).iloc[-1]
-            m_obj = ta.trend.MACD(df3['c'])
+            # ১৫-মিনিট ইন্ডিকেটর (RSI 14, EMA 20, EMA 50)
+            r15 = ta.momentum.rsi(df15['c'], window=14).fillna(0).iloc[-1]
+            e20 = ta.trend.ema_indicator(df15['c'], 20).fillna(0).iloc[-1]
+            e50 = ta.trend.ema_indicator(df15['c'], 50).fillna(0).iloc[-1]
+            
+            # ১-ঘণ্টা চার্ট ইন্ডিকেটর (RSI 14, EMA 200, MACD)
+            r1h = ta.momentum.rsi(df1h['c'], window=14).fillna(0).iloc[-1]
+            e200 = ta.trend.ema_indicator(df1h['c'], 200).fillna(0).iloc[-1]
+            
+            m_obj = ta.trend.MACD(df1h['c'])
             mv = m_obj.macd().iloc[-1]
             ms = m_obj.macd_signal().iloc[-1]
             
-            pats1 = get_advanced_pats(df1)
-            pats3 = get_advanced_pats(df3)
-            pats5 = get_advanced_pats(df5)
+            pats15 = get_advanced_pats(df15)
+            pats1h = get_advanced_pats(df1h)
             
             cur = load_state()
+            in_pos = cur.get("in_position", False)
+            entry_p = cur.get("entry_price", 0.0)
             
-            # ওল্ড স্টেট ফাইল মার্জ করা
+            # ওল্ড স্টেট ফাইল সেফলি মার্জ করা
             for k, v in DEFAULT_STATE.items():
                 if k not in cur:
                     cur[k] = v
                     
-            l_pnl = ((p / entry_p) - 1) * 100 if in_pos else 0.0
-            l_val = (100.0 / entry_p * p) - 100.0 if in_pos else 0.0
+            # ৭. উভয়মুখী (LONG & SHORT) লাইভ প্রফিট এবং ডলার ভ্যালু হিসাব
+            if in_pos:
+                pos_size_usd = cur.get("pos_size", 0.0)
+                if position_type == "LONG":
+                    l_pnl = ((p / entry_p) - 1) * 100 * LEVERAGE
+                    l_val = pos_size_usd * ((p / entry_p) - 1)
+                else: # SHORT Position
+                    l_pnl = (1 - (p / entry_p)) * 100 * LEVERAGE
+                    l_val = pos_size_usd * (1 - (p / entry_p))
+            else:
+                l_pnl = 0.0
+                l_val = 0.0
 
-            # কুলডাউন শেষ হয়েছে কিনা যাচাই
+            # কুলডাউন যাচাই
             time_since_last_trade = time.time() - last_trade_time
             cooldown_over = time_since_last_trade >= COOLDOWN_SECONDS
 
-            # ১. ক্রয়ের লজিক (BUY Condition)
-            bull_signal = any(pt['t'] == 'bull' for pt in pats1) or any(pt['t'] == 'bull' for pt in pats3)
-            macro_uptrend = p > e5_20
-            can_buy = (p > e9 and p > e21 and macro_uptrend and (45 < r1 < 68) and bull_signal and cooldown_over)
+            # ক্রয়ের লজিক (LONG এবং SHORT সিগন্যাল আলাদা ক্যালকুলেশন)
+            bull_signal = any(pt['t'] == 'bull' for pt in pats15) or any(pt['t'] == 'bull' for pt in pats1h)
+            bear_signal = any(pt['t'] == 'bear' for pt in pats15) or any(pt['t'] == 'bear' for pt in pats1h)
+            
+            macro_bullish = p > e200
+            macro_bearish = p < e200
+            
+            ema_long_alignment = p > e20 and p > e50
+            ema_short_alignment = p < e20 and p < e50
+            
+            # ক. LONG ক্রয়ের শর্তসমূহ (ঊর্ধ্বমুখী)
+            can_buy_long = (macro_bullish and 
+                            ema_long_alignment and 
+                            btc_bullish and 
+                            volume_confirmed and 
+                            ob_imbalance_long and 
+                            vwap_long_confirmed and 
+                            (40 < r15 < 65) and 
+                            (mv > ms) and 
+                            bull_signal and 
+                            cooldown_over)
 
-            # ২. বিক্রয়ের লজিক (SELL / Exit Condition)
-            bear_signal = any(pt['t'] == 'bear' for pt in pats3)
-            smart_sell = p < e9 or r1 > 75
+            # খ. SHORT ক্রয়ের শর্তসমূহ (পতনমুখী)
+            can_buy_short = (macro_bearish and 
+                             ema_short_alignment and 
+                             btc_bearish and 
+                             volume_confirmed and 
+                             ob_imbalance_short and 
+                             vwap_short_confirmed and 
+                             (35 < r15 < 60) and 
+                             (mv < ms) and 
+                             bear_signal and 
+                             cooldown_over)
+
+            # গ. টু-ওয়ে স্মার্ট এক্সিট (Smart Exit)
+            # LONG পজিশন ক্লোজের শর্ত
+            long_smart_sell = p < e50 or r15 > 78
+            # SHORT পজিশন ক্লোজের শর্ত
+            short_smart_sell = p > e50 or r15 < 22
 
             if in_pos:
-                # ক. ব্রেক-ইভেন সুরক্ষাকবচ (Breakeven Protection)
-                breakeven_trigger = entry_p * 1.0008
-                if p >= breakeven_trigger and cur["sl_level"] < entry_p:
-                    cur.update({"sl_level": round(entry_p, 2)})
-                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": "🛡️ SL Breakeven-এ উন্নীত (ঝুঁকিমুক্ত ট্রেড)"})
+                initial_sl_dist_pct = abs(1 - (cur["sl_level"] / entry_p)) if entry_p > 0 else DEF_SL
+                
+                # LONG পজিশন ম্যানেজমেন্ট
+                if position_type == "LONG":
+                    # ব্রেক-ইভেন সুরক্ষাকবচ
+                    breakeven_trigger = entry_p * (1 + (0.6 * initial_sl_dist_pct))
+                    if p >= breakeven_trigger and cur["sl_level"] < entry_p:
+                        cur.update({"sl_level": round(entry_p, 2)})
+                        cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": "🛡️ SL Breakeven-এ উন্নীত [🟢 LONG]"})
 
-                # খ. ট্রেইলিং স্টপ লস আপডেট করা
-                if p > peak_p:
-                    peak_p = p
-                    new_sl = round(p * (1 - DEF_SL), 2)
-                    if new_sl > cur["sl_level"]:
-                        cur.update({"sl_level": new_sl})
+                    # ট্রেইলিং স্টপ লস
+                    if p > peak_p:
+                        peak_p = p
+                        new_sl = round(p * (1 - initial_sl_dist_pct), 2)
+                        if new_sl > cur["sl_level"]:
+                            cur.update({"sl_level": new_sl, "peak_p": peak_p})
 
-                # গ. টেক প্রফিট, স্টপ লস অথবা স্মার্ট সেল ট্রিগার হলে পজিশন ক্লোজ
-                if p >= cur["tp_level"] or p <= cur["sl_level"] or smart_sell:
-                    in_pos = False
-                    net_pnl += l_val
-                    pnl_hist.append(net_pnl)
-                    
-                    if p > entry_p: wins += 1
+                    # এক্সিট ট্রিগার
+                    if p >= cur["tp_level"] or p <= cur["sl_level"] or long_smart_sell:
+                        in_pos = False
+                        position_type = "NONE"
+                        net_pnl += l_val
+                        pnl_hist.append(net_pnl)
+                        if p > entry_p: wins += 1
                         
-                    cur.update({
-                        "balance": round(100.0 + net_pnl, 2),
-                        "total_pnl": round(net_pnl, 2),
-                        "win_rate": round((wins / total) * 100, 1),
-                        "best": round(max(pnl_hist), 2),
-                        "last_action": "SELL"
-                    })
-                    cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "SELL", "p": round(p, 2), "r": f"{round(l_pnl, 2)}%"})
-                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🔴 SELL @ ${p:.2f} ({'Smart Exit' if smart_sell else 'Target'})"})
-                    
-                    last_trade_time = time.time()
+                        cur.update({
+                            "balance": round(100.0 + net_pnl, 2),
+                            "total_pnl": round(net_pnl, 2),
+                            "win_rate": round((wins / total) * 100, 1),
+                            "best": round(max(pnl_hist), 2),
+                            "last_action": "SELL",
+                            "in_position": False,
+                            "position_type": "NONE",
+                            "pos_size": 0.0,
+                            "margin": 0.0,
+                            "peak_p": 0.0
+                        })
+                        cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "SELL", "p": round(p, 2), "r": f"{round(l_pnl, 2)}%"})
+                        cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🔴 LONG Exit @ ${p:.2f} ({'Smart Exit' if long_smart_sell else 'Target'})"})
+                        last_trade_time = time.time()
+
+                # SHORT পজিশন ম্যানেজমেন্ট (পতনের হিসাব)
+                elif position_type == "SHORT":
+                    # ব্রেক-ইভেন সুরক্ষাকবচ (মূল্য নিচে নামলে লাভ হয়, তাই নিচে ট্রিগার করবে)
+                    breakeven_trigger = entry_p * (1 - (0.6 * initial_sl_dist_pct))
+                    if p <= breakeven_trigger and cur["sl_level"] > entry_p:
+                        cur.update({"sl_level": round(entry_p, 2)})
+                        cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": "🛡️ SL Breakeven-এ উন্নীত [🔴 SHORT]"})
+
+                    # ট্রেইলিং স্টপ লস (মূল্য নিচে নামলে SL-কে আরও নিচে ট্রেইল করবে)
+                    if valley_p == 0.0 or p < valley_p:
+                        valley_p = p
+                        new_sl = round(p * (1 + initial_sl_dist_pct), 2)  # স্টপ লস থাকবে ওপরে
+                        if cur["sl_level"] == 0.0 or new_sl < cur["sl_level"]:
+                            cur.update({"sl_level": new_sl, "valley_p": valley_p})
+
+                    # এক্সিট ট্রিগার (TP থাকে নিচে, SL থাকে ওপরে)
+                    if p <= cur["tp_level"] or p >= cur["sl_level"] or short_smart_sell:
+                        in_pos = False
+                        position_type = "NONE"
+                        net_pnl += l_val
+                        pnl_hist.append(net_pnl)
+                        if p < entry_p: wins += 1
+                        
+                        cur.update({
+                            "balance": round(100.0 + net_pnl, 2),
+                            "total_pnl": round(net_pnl, 2),
+                            "win_rate": round((wins / total) * 100, 1),
+                            "best": round(max(pnl_hist), 2),
+                            "last_action": "SELL",
+                            "in_position": False,
+                            "position_type": "NONE",
+                            "pos_size": 0.0,
+                            "margin": 0.0,
+                            "valley_p": 0.0
+                        })
+                        cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "SELL", "p": round(p, 2), "r": f"{round(l_pnl, 2)}%"})
+                        cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🔴 SHORT Exit @ ${p:.2f} ({'Smart Exit' if short_smart_sell else 'Target'})"})
+                        last_trade_time = time.time()
             else:
-                if can_buy:
+                # ক্রয়ের সিদ্ধান্ত (LONG)
+                if can_buy_long:
                     entry_p = p
                     peak_p = p
                     in_pos = True
+                    position_type = "LONG"
                     total += 1
+                    
+                    account_balance = cur.get("balance", INITIAL_FUND)
+                    risk_amount = account_balance * RISK_FRACTION
+                    pos_size_usd = risk_amount / dynamic_sl_pct
+                    pos_size_usd = max(10.0, min(account_balance * LEVERAGE, pos_size_usd)) 
+                    margin_usd = pos_size_usd / LEVERAGE  
                     
                     cur.update({
                         "trades": total,
-                        "balance": 0.0,
-                        "sl_level": round(p * (1 - DEF_SL), 2),
-                        "tp_level": round(p * (1 + DEF_TP), 2),
-                        "last_action": "BUY"
+                        "balance": round(account_balance, 2),
+                        "in_position": True,
+                        "position_type": "LONG",
+                        "sl_level": round(p * (1 - dynamic_sl_pct), 2),
+                        "tp_level": round(p * (1 + dynamic_tp_pct), 2),
+                        "last_action": "BUY",
+                        "pos_size": round(pos_size_usd, 2),
+                        "margin": round(margin_usd, 2),
+                        "peak_p": peak_p
                     })
-                    cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "BUY", "p": round(p, 2), "r": "---"})
-                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🟢 BUY @ ${p:.2f} (Prediction Confirmed)"})
+                    cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "BUY", "p": round(p, 2), "r": "---" })
+                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🟢 BUY [LONG] @ ${p:.2f} (Size: ${pos_size_usd:.2f})"})
+                
+                # ক্রয়ের সিদ্ধান্ত (SHORT - নতুন)
+                elif can_buy_short:
+                    entry_p = p
+                    valley_p = p
+                    in_pos = True
+                    position_type = "SHORT"
+                    total += 1
+                    
+                    account_balance = cur.get("balance", INITIAL_FUND)
+                    risk_amount = account_balance * RISK_FRACTION
+                    pos_size_usd = risk_amount / dynamic_sl_pct
+                    pos_size_usd = max(10.0, min(account_balance * LEVERAGE, pos_size_usd)) 
+                    margin_usd = pos_size_usd / LEVERAGE  
+                    
+                    cur.update({
+                        "trades": total,
+                        "balance": round(account_balance, 2),
+                        "in_position": True,
+                        "position_type": "SHORT",
+                        "sl_level": round(p * (1 + dynamic_sl_pct), 2), # স্টপ লস ওপরে থাকবে
+                        "tp_level": round(p * (1 - dynamic_tp_pct), 2), # টেক প্রফিট নিচে থাকবে
+                        "last_action": "BUY",
+                        "pos_size": round(pos_size_usd, 2),
+                        "margin": round(margin_usd, 2),
+                        "valley_p": valley_p
+                    })
+                    cur["history"].insert(0, {"t": datetime.now().strftime("%H:%M"), "a": "BUY", "p": round(p, 2), "r": "---" })
+                    cur["log"].insert(0, {"t": datetime.now().strftime("%H:%M"), "m": f"🟢 BUY [SHORT] @ ${p:.2f} (Size: ${pos_size_usd:.2f})"})
             
-            # স্টেট ফাইলে আপডেট করা
+            # ড্যাশবোর্ডের জন্য স্টেট আপডেট
             cur.update({
                 "price": round(p, 2),
                 "last_update": datetime.now(timezone.utc).strftime("%H:%M:%S"),
                 "in_position": in_pos,
+                "position_type": position_type,
                 "live_pnl_pct": round(l_pnl, 2),
                 "live_pnl_val": round(l_val, 2),
                 "entry_price": round(entry_p, 2),
-                "analysis_1m": {
-                    "rsi": round(r1, 1),
-                    "ema": round(e9, 2),
-                    "sig": "বুলিশ ✅" if p > e9 else "বেয়ারিশ ❌",
-                    "pats": pats1
+                "analysis_15m": {
+                    "rsi": round(r15, 1),
+                    "ema20": round(e20, 2),
+                    "ema50": round(e50, 2),
+                    "vwap": round(vwap, 2),
+                    "sig": "বুলিশ ✅" if p > e20 else "বেয়ারিশ ❌",
+                    "pats": pats15
                 },
-                "analysis_3m": {
-                    "rsi": round(r3, 1),
-                    "macd": round(mv, 3),
-                    "sig": "বুলিশ ✅" if mv > ms else "নিরপেক্ষ ⚖️",
-                    "pats": pats3
-                },
-                "analysis_5m": {
-                    "rsi": round(r5, 1),
-                    "ema": round(e5_20, 2),
-                    "sig": "বুলিশ ✅" if p > e5_20 else "বেয়ারিশ ❌",
-                    "pats": pats5
+                "analysis_1h": {
+                    "rsi": round(r1h, 1),
+                    "ema200": round(e200, 2),
+                    "btc_price": round(btc_p, 1),
+                    "sig": "বুলিশ ✅" if p > e200 else "বেয়ারিশ ❌",
+                    "pats": pats1h
                 }
             })
             
             # ড্যাশবোর্ডের জন্য ওয়েটিং মেসেজ সাজানো
             if in_pos:
-                cur["wait_reason"] = "পজিশন সক্রিয়"
+                cur["wait_reason"] = f"পজিশন সক্রিয় [{position_type}]"
             elif not cooldown_over:
                 remaining_seconds = int(COOLDOWN_SECONDS - time_since_last_trade)
-                cur["wait_reason"] = f"কুলডাউন ({remaining_seconds} সেকেন্ড বাকি)"
-            elif not macro_uptrend:
-                cur["wait_reason"] = "৫-মিনিট ট্রেন্ড ডাউন (ম্যাক্রো বেয়ারিশ)"
+                cur["wait_reason"] = f"কুলডাউন ({int(remaining_seconds/60)} মিনিট বাকি)"
+            elif not btc_bullish and p > e200:
+                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড ডাউন (BTC Bearish)"
+            elif btc_bullish and p < e200:
+                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড আপ (SOL SHORT এর উপযুক্ত নয়)"
+            elif not vwap_long_confirmed and p > e200:
+                cur["wait_reason"] = "মূল্য VWAP লাইনের নিচে (Bearish Volume Zone)"
+            elif not vwap_short_confirmed and p < e200:
+                cur["wait_reason"] = "মূল্য VWAP লাইনের ওপরে (Bullish Volume Zone)"
+            elif not volume_confirmed:
+                cur["wait_reason"] = "দুর্বল ভলিউম (ভলিউম ব্রেকআউটের অপেক্ষা)"
+            elif not ob_confirmed:
+                cur["wait_reason"] = "অর্ডার বুক ইমব্যালেন্স (অস্থির তারল্য)"
+            elif not ema_long_alignment and p > e200:
+                cur["wait_reason"] = "১৫-মিনিট চার্টে ল্যাপ বা রিট্রেসমেন্ট চলছে"
+            elif not ema_short_alignment and p < e200:
+                cur["wait_reason"] = "১৫-মিনিট চার্টে বাউন্স ব্যাক বা কারেকশন চলছে"
             else:
-                cur["wait_reason"] = "স্কাল্পিং প্যাটার্ন খুঁজছে..." if p > e9 else "ট্রেন্ড ডাউন"
+                cur["wait_reason"] = "সুইং এন্ট্রি প্যাটার্ন খুঁজছে..."
                 
             save_state(cur)
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot Engine Warning: {e}")
             
-        # মাত্র ১টি এপিআই রিকোয়েস্ট হওয়ার কারণে ৩ সেকেন্ড লোড অত্যন্ত স্থিতিশীল
-        time.sleep(1.5)
+        time.sleep(10)
 
 
-# ব্যাকগ্রাউন্ড ট্রেডিং থ্রেড রান করা
+# ব্যাকগ্রাউন্ড থ্রেড চালু করা
 threading.Thread(target=bot_engine, daemon=True).start()
 
 
@@ -363,9 +539,10 @@ UI = """
 </head>
 <body class="p-3 text-slate-800">
 <div class="max-w-md mx-auto">
-    <!-- বট স্ট্যাটাস -->
-    <div class="text-center mb-6">
+    <!-- বট স্ট্যাটাস এবং ফিউচার্স ব্যাজ -->
+    <div class="flex justify-center gap-2 mb-6 text-center">
         <span class="bg-green-100 text-green-700 px-4 py-1 rounded-lg text-xs font-bold border border-green-200">&#9989; বট চলছে</span>
+        <span class="bg-blue-100 text-blue-700 px-4 py-1 rounded-lg text-xs font-bold border border-blue-200">&#128640; ফিউচার্স ১০x লিভারেজ</span>
     </div>
     
     <!-- পরিসংখ্যান -->
@@ -388,9 +565,12 @@ UI = """
             <div class="text-right text-[10px] text-slate-400 font-bold">ব্যালেন্স: <b id="bl">$100.00</b></div>
         </div>
         
-        <!-- লাইভ পজিশন কালার বক্স -->
+        <!-- লাইভ পজিশন কালার বক্স (SHORT/LONG ইন্ডিকেটর সহ) -->
         <div id="pnl_display" class="hidden mb-4 p-5 border-2 rounded-3xl text-center bg-white shadow-lg">
-            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">লাইভ পজিশন প্রফিট</p>
+            <div class="flex justify-between items-center mb-2">
+                <p class="text-[10px] font-bold text-slate-400 uppercase">লাইভ পজিশন প্রফিট</p>
+                <span id="pos_type" class="text-[10px] font-black px-2 py-0.5 rounded uppercase">NONE</span>
+            </div>
             <p id="lp" class="text-4xl font-black">0.00%</p>
             <div class="flex justify-around mt-4 text-[10px] font-bold border-t pt-2">
                 <div class="text-red-500">🛑 SL: <span id="sl">0</span></div>
@@ -401,48 +581,38 @@ UI = """
         <div id="st" class="bg-orange-50 text-orange-600 p-2.5 rounded-xl text-[11px] font-bold border border-orange-100 text-center uppercase tracking-wide italic">&#8987; লোড হচ্ছে...</div>
     </div>
 
-    <!-- ১ মিনিট বিশ্লেষণ প্যানেল -->
+    <!-- ১৫ মিনিট বিশ্লেষণ প্যানেল -->
     <div class="card p-4 mb-4 text-[11px]">
         <div class="flex justify-between mb-3 items-center">
-            <h3 class="font-bold text-slate-700 text-xs">&#128202; 1 মিনিট বিশ্লেষণ</h3>
-            <span id="s1" class="font-bold px-2 py-0.5 rounded text-[10px]">WAIT</span>
+            <h3 class="font-bold text-slate-700 text-xs">&#128202; ১৫ মিনিট বিশ্লেষণ</h3>
+            <span id="s15" class="font-bold px-2 py-0.5 rounded text-[10px]">WAIT</span>
         </div>
         <div class="grid grid-cols-2 text-slate-500 font-medium">
-            <span>RSI: <b id="r1">0</b></span>
-            <span>EMA 9: <b id="e1">0</b></span>
+            <span>RSI: <b id="r15">0</b></span>
+            <span>EMA 20: <b id="e20">0</b></span>
+            <span>EMA 50: <b id="e50">0</b></span>
+            <span>VWAP: <b id="vw">0</b></span>
         </div>
-        <div id="pats1" class="mt-3 flex flex-wrap gap-1"></div>
+        <div id="pats15" class="mt-3 flex flex-wrap gap-1"></div>
     </div>
     
-    <!-- ৩ মিনিট বিশ্লেষণ প্যানেল -->
+    <!-- ১ ঘণ্টা বিশ্লেষণ প্যানেল -->
     <div class="card p-4 mb-4 text-[11px]">
         <div class="flex justify-between mb-3 items-center">
-            <h3 class="font-bold text-slate-700 text-xs">&#128202; 3 মিনিট বিশ্লেষণ</h3>
-            <span id="s3" class="font-bold px-2 py-0.5 rounded text-[10px]">WAIT</span>
+            <h3 class="font-bold text-slate-700 text-xs">&#128202; ১ ঘণ্টা বিশ্লেষণ</h3>
+            <span id="s1h" class="font-bold px-2 py-0.5 rounded text-[10px]">WAIT</span>
         </div>
         <div class="grid grid-cols-2 text-slate-500 font-medium">
-            <span>RSI: <b id="r3">0</b></span>
-            <span>MACD: <b id="m3">0</b></span>
+            <span>RSI: <b id="r1h">0</b></span>
+            <span>EMA 200: <b id="e200">0</b></span>
+            <span>BTC Price: <b id="bp">0</b></span>
         </div>
-        <div id="pats3" class="mt-3 flex flex-wrap gap-1"></div>
-    </div>
-
-    <!-- ৫ মিনিট বিশ্লেষণ প্যানেল -->
-    <div class="card p-4 mb-4 text-[11px]">
-        <div class="flex justify-between mb-3 items-center">
-            <h3 class="font-bold text-slate-700 text-xs">&#128202; 5 মিনিট বিশ্লেষণ</h3>
-            <span id="s5" class="font-bold px-2 py-0.5 rounded text-[10px]">WAIT</span>
-        </div>
-        <div class="grid grid-cols-2 text-slate-500 font-medium">
-            <span>RSI: <b id="r5">0</b></span>
-            <span>EMA 20: <b id="e5">0</b></span>
-        </div>
-        <div id="pats5" class="mt-3 flex flex-wrap gap-1"></div>
+        <div id="pats1h" class="mt-3 flex flex-wrap gap-1"></div>
     </div>
 
     <!-- চার্ট উইজেট -->
     <div class="card overflow-hidden h-60 mb-4 border border-slate-100 shadow-inner">
-        <iframe src="https://s.tradingview.com/widgetembed/?symbol=BITGET%3ASOLUSDT&interval=1&theme=light" width="100%" height="100%" frameborder="0"></iframe>
+        <iframe src="https://s.tradingview.com/widgetembed/?symbol=BITGET%3ASOLUSDT&interval=15&theme=light" width="100%" height="100%" frameborder="0"></iframe>
     </div>
     
     <!-- ট্রেড হিস্ট্রি টেবিল -->
@@ -502,59 +672,58 @@ UI = """
                     const col = d.live_pnl_pct >= 0 ? 'text-green-600' : 'text-red-600';
                     document.getElementById('lp').className = 'text-4xl font-black ' + col;
                     disp.className = 'mb-4 p-5 border-2 rounded-3xl text-center bg-white shadow-lg ' + (d.live_pnl_pct >= 0 ? 'border-green-100' : 'border-red-100');
+                    
+                    // পজিশন টাইপ আপডেট (LONG বা SHORT)
+                    const p_type = document.getElementById('pos_type');
+                    p_type.innerText = d.position_type;
+                    if (d.position_type === 'LONG') {
+                        p_type.className = 'text-[10px] font-black px-2 py-0.5 rounded bg-green-50 text-green-700 border border-green-200 uppercase';
+                    } else if (d.position_type === 'SHORT') {
+                        p_type.className = 'text-[10px] font-black px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 uppercase';
+                    } else {
+                        p_type.className = 'hidden';
+                    }
                 } else { 
                     document.getElementById('pnl_display').classList.add('hidden'); 
                 }
                 
-                // ১ মিনিট সিগন্যাল ডাইনামিক স্টাইল
-                document.getElementById('r1').innerText = d.analysis_1m.rsi; 
-                document.getElementById('e1').innerText = '$' + d.analysis_1m.ema;
+                // ১৫ মিনিট সিগন্যাল ডাইনামিক স্টাইল
+                document.getElementById('r15').innerText = d.analysis_15m.rsi; 
+                document.getElementById('e20').innerText = '$' + d.analysis_15m.ema20;
+                document.getElementById('e50').innerText = '$' + d.analysis_15m.ema50;
+                document.getElementById('vw').innerText = '$' + d.analysis_15m.vwap;
                 
-                const s1 = document.getElementById('s1'); 
-                s1.innerText = d.analysis_1m.sig;
-                if (d.analysis_1m.sig.includes('বুলিশ')) {
-                    s1.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-green-50 text-green-700 border border-green-200';
-                } else if (d.analysis_1m.sig.includes('বেয়ারিশ')) {
-                    s1.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-700 border border-red-200';
+                const s15 = document.getElementById('s15'); 
+                s15.innerText = d.analysis_15m.sig;
+                if (d.analysis_15m.sig.includes('বুলিশ')) {
+                    s15.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-green-50 text-green-700 border border-green-200';
+                } else if (d.analysis_15m.sig.includes('বেয়ারিশ')) {
+                    s15.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-700 border border-red-200';
                 } else {
-                    s1.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
+                    s15.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
                 }
                 
-                // ৩ মিনিট সিগন্যাল ডাইনামিক স্টাইল
-                document.getElementById('r3').innerText = d.analysis_3m.rsi; 
-                document.getElementById('m3').innerText = d.analysis_3m.macd;
+                // ১ ঘণ্টা সিগন্যাল ডাইনামিক স্টাইল
+                document.getElementById('r1h').innerText = d.analysis_1h.rsi; 
+                document.getElementById('e200').innerText = '$' + d.analysis_1h.ema200;
+                document.getElementById('bp').innerText = '$' + d.analysis_1h.btc_price;
                 
-                const s3 = document.getElementById('s3'); 
-                s3.innerText = d.analysis_3m.sig;
-                if (d.analysis_3m.sig.includes('বুলিশ')) {
-                    s3.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-green-50 text-green-700 border border-green-200';
-                } else if (d.analysis_3m.sig.includes('বেয়ারিশ')) {
-                    s3.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-700 border border-red-200';
+                const s1h = document.getElementById('s1h'); 
+                s1h.innerText = d.analysis_1h.sig;
+                if (d.analysis_1h.sig.includes('বুলিশ')) {
+                    s1h.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-green-50 text-green-700 border border-green-200';
+                } else if (d.analysis_1h.sig.includes('বেয়ারিশ')) {
+                    s1h.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-700 border border-red-200';
                 } else {
-                    s3.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
-                }
-
-                // ৫ মিনিট সিগন্যাল ডাইনামিক স্টাইল
-                document.getElementById('r5').innerText = d.analysis_5m.rsi; 
-                document.getElementById('e5').innerText = '$' + d.analysis_5m.ema;
-                
-                const s5 = document.getElementById('s5'); 
-                s5.innerText = d.analysis_5m.sig;
-                if (d.analysis_5m.sig.includes('বুলিশ')) {
-                    s5.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-green-50 text-green-700 border border-green-200';
-                } else if (d.analysis_5m.sig.includes('বেয়ারিশ')) {
-                    s5.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-700 border border-red-200';
-                } else {
-                    s5.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
+                    s1h.className = 'font-bold px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200';
                 }
 
                 // প্যাটার্ন ডিসপ্লে রেন্ডার
                 const tag = (p) => `<span class="tag ${p.t==='bull'?'tag-bull':'tag-bear'}">${p.n}</span>`;
                 const no_pat = '<p class="text-gray-400 italic text-[10px]">কোনো ক্যান্ডেলস্টিক প্যাটার্ন নেই</p>';
                 
-                document.getElementById('pats1').innerHTML = d.analysis_1m.pats.length > 0 ? d.analysis_1m.pats.map(tag).join('') : no_pat;
-                document.getElementById('pats3').innerHTML = d.analysis_3m.pats.length > 0 ? d.analysis_3m.pats.map(tag).join('') : no_pat;
-                document.getElementById('pats5').innerHTML = d.analysis_5m.pats.length > 0 ? d.analysis_5m.pats.map(tag).join('') : no_pat;
+                document.getElementById('pats15').innerHTML = d.analysis_15m.pats.length > 0 ? d.analysis_15m.pats.map(tag).join('') : no_pat;
+                document.getElementById('pats1h').innerHTML = d.analysis_1h.pats.length > 0 ? d.analysis_1h.pats.map(tag).join('') : no_pat;
 
                 // ট্রেড হিস্ট্রি ডাটা টেবিল আপডেট
                 document.getElementById('hb').innerHTML = d.history.slice(0,5).map(h => `
@@ -576,8 +745,8 @@ UI = """
             }
         } catch (e) {}
     }
-    // প্রতি ৩ সেকেন্ড পর পর ড্যাশবোর্ড আপডেট হবে
-    setInterval(update, 1.5000); 
+    // ড্যাশবোর্ড ৫ সেকেন্ড পর পর ডাটা লোড করবে
+    setInterval(update, 5000); 
     update();
 </script>
 </body>
