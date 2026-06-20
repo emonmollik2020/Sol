@@ -541,13 +541,13 @@ def bot_engine():
                 remaining_seconds = int(COOLDOWN_SECONDS - time_since_last_trade)
                 cur["wait_reason"] = f"কুলডাউন ({int(remaining_seconds/60)} মিনিট বাকি)"
             elif not btc_bullish and p > e200:
-                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড ডাউন (BTC Bearish)"
+                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড ডাউন (BTC বেওয়ারিশ)"
             elif btc_bullish and p < e200:
-                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড আপ (SOL SHORT এর উপযুক্ত নয়)"
+                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড আপ (BTC বুলিশ)"
             elif not vwap_long_confirmed and p > e200:
-                cur["wait_reason"] = "মূল্য VWAP লাইনের নিচে (Bearish Volume Zone)"
+                cur["wait_reason"] = "মূল্য VWAP লাইনের নিচে (বেওয়ারিশ ভলিউম জোন)"
             elif not vwap_short_confirmed and p < e200:
-                cur["wait_reason"] = "মূল্য VWAP লাইনের ওপরে (Bullish Volume Zone)"
+                cur["wait_reason"] = "মূল্য VWAP লাইনের ওপরে (বুলিশ ভলিউম জোন)"
             elif not volume_confirmed:
                 cur["wait_reason"] = "দুর্বল ভলিউম (ভলিউম ব্রেকআউটের অপেক্ষা)"
             elif not ob_confirmed:
@@ -636,7 +636,7 @@ UI = """
         <!-- আনুমানিক ট্রেড পাওয়ার সময় (৮টি কন্ডিশনের ওপর ভিত্তি করে) -->
         <div class="text-[10px] text-slate-400 font-bold mb-4 text-left border-t pt-2 flex justify-between">
             <span>আনুমানিক পরবর্তী ট্রেড:</span>
-            <span id="est_time" class="text-slate-800 font-black">로드 হচ্ছে...</span>
+            <span id="est_time" class="text-slate-800 font-black">লোড হচ্ছে...</span>
         </div>
         
         <!-- লাইভ পজিশন কালার বক্স (SHORT/LONG ইন্ডিকেটর সহ) -->
@@ -658,7 +658,7 @@ UI = """
     <!-- কনফ্লুয়েন্স ডাবল চেকলিস্ট প্যানেল -->
     <div class="card p-4 mb-4 text-[11px]">
         <h3 class="font-bold text-slate-700 text-xs mb-3 flex justify-between items-center">
-            <span>🛡️ প্রাতিষ্ঠানিক টু-ওয়ে চেকলিস্ট</span>
+            <span>🛡️ প্রাতিষ্ঠানিক চেকলিস্ট</span>
             <span class="text-[9px] px-2 py-0.5 rounded font-black bg-blue-100 text-blue-700 border border-blue-200 uppercase">2-WAY MONITOR</span>
         </h3>
         
