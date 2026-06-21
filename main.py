@@ -541,11 +541,11 @@ def bot_engine():
                 remaining_seconds = int(COOLDOWN_SECONDS - time_since_last_trade)
                 cur["wait_reason"] = f"কুলডাউন ({int(remaining_seconds/60)} মিনিট বাকি)"
             elif not btc_bullish and p > e200:
-                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড ডাউন (BTC বেওয়ারিশ)"
+                cur["wait_reason"] = "বিটকয়েন ট্রেন্ড ডাউন (BTC বেয়ারিশ)"
             elif btc_bullish and p < e200:
                 cur["wait_reason"] = "বিটকয়েন ট্রেন্ড আপ (BTC বুলিশ)"
             elif not vwap_long_confirmed and p > e200:
-                cur["wait_reason"] = "মূল্য VWAP লাইনের নিচে (বেওয়ারিশ ভলিউম জোন)"
+                cur["wait_reason"] = "মূল্য VWAP লাইনের নিচে (বেয়ারিশ ভলিউম জোন)"
             elif not vwap_short_confirmed and p < e200:
                 cur["wait_reason"] = "মূল্য VWAP লাইনের ওপরে (বুলিশ ভলিউম জোন)"
             elif not volume_confirmed:
