@@ -152,7 +152,7 @@ def get_advanced_pats(df):
         
     # বুলিশ এনгалফিং (Bullish Engulfing)
     if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c'] and b1 > b2: 
-        p.append({"n": "বুলিশ এনгалফিং \U0001F4C8", "t": "bull"})
+        p.append({"n": "বুলিশ এনগালফিং \U0001F4C8", "t": "bull"})
         
     # মর্নিং স্টার (Morning Star)
     if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2 and not d2: 
@@ -228,7 +228,7 @@ def get_advanced_pats(df):
         
     # বেয়ারিশ এনгалফিং (Bearish Engulfing)
     if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c'] and b1 > b2: 
-        p.append({"n": "বেয়ারিশ এনгалফিং \U0001F4C9", "t": "bear"})
+        p.append({"n": "বেয়ারিশ এনগালফিং \U0001F4C9", "t": "bear"})
         
     # ইভনিং স্টার (Evening Star)
     if g3 and b2 < (b3 * 0.3) and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2 and not d2: 
