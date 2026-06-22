@@ -112,47 +112,213 @@ app = Flask(__name__)
 
 
 # =====================================================================
-# SECTION 3: ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর
+# SECTION 3: ক্যান্ডেলস্টিক প্যাটার্ন ডিটেক্টর (প্রমিত বাংলা ও ইউনিকোড সংবলিত)
 # =====================================================================
 def get_advanced_pats(df):
     p = []
-    if len(df) < 5:
+    # ৫-ক্যান্ডেল কন্টিনিউয়েশন প্যাটার্ন ট্র্যাক করতে কমপক্ষে ৬টি ক্যান্ডেল দরকার
+    if len(df) < 6:
         return p
-    c1, c2, c3 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
+        
+    c1, c2, c3, c4, c5 = df.iloc[-1], df.iloc[-2], df.iloc[-3], df.iloc[-4], df.iloc[-5]
+    
     def info(c):
         body = abs(c['c'] - c['o'])
         total = max(0.001, c['h'] - c['l'])
         u_wick = c['h'] - max(c['c'], c['o'])
         l_wick = min(c['c'], c['o']) - c['l']
         is_green = c['c'] > c['o']
-        return body, total, u_wick, l_wick, is_green
+        # ডোজি ক্যান্ডেলস্টিক ডিটেকশন (বডি যখন মোট সীমার ১০% এর কম হয়)
+        is_doji = (body / total) < 0.1
+        return body, total, u_wick, l_wick, is_green, is_doji
         
-    b1, t1, u1, l1, g1 = info(c1)
-    b2, t2, u2, l2, g2 = info(c2)
-    b3, t3, u3, l3, g3 = info(c3)
+    b1, t1, u1, l1, g1, d1 = info(c1)
+    b2, t2, u2, l2, g2, d2 = info(c2)
+    b3, t3, u3, l3, g3, d3 = info(c3)
+    b4, t4, u4, l4, g4, d4 = info(c4)
+    b5, t5, u5, l5, g5, d5 = info(c5)
 
-    # বুলিশ প্যাটার্নস
-    if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1: p.append({"n": "হ্যামার 🔨", "t": "bull"})
-    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and g1: p.append({"n": "ইনভার্টেড হ্যামার 🔨", "t": "bull"})
-    if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c']: p.append({"n": "বুলিশ এনгалফিং 📈", "t": "bull"})
-    if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2: p.append({"n": "মর্নিং স্টার 🌅", "t": "bull"})
-    if b1 / t1 > 0.85 and g1: p.append({"n": "বুলিশ মারুবোজু 💪", "t": "bull"})
-    if not g2 and g1 and c1['o'] < c2['c'] and c1['c'] > (c2['o'] + c2['c']) / 2 and c1['c'] < c2['o']: p.append({"n": "পিয়ার্সিং লাইন ⚡", "t": "bull"})
-    if not g2 and g1 and c1['c'] < c2['o'] and c1['o'] > c2['c'] and b1 < b2: p.append({"n": "বুলিশ হারামি 🤰", "t": "bull"})
-    if g1 and g2 and g3 and c1['c'] > c2['c'] and c2['c'] > c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2: p.append({"n": "থ্রি হোয়াইট সোলজার্স 💂‍♂️", "t": "bull"})
-    if abs(c1['l'] - c2['l']) / max(0.001, c1['l']) < 0.001 and not g2 and g1: p.append({"n": "টুইজার বটম 🧲", "t": "bull"})
+    # -----------------------------------------------------------------
+    # ১. বুলিশ প্যাটার্নস (LONG সিগন্যাল)
+    # -----------------------------------------------------------------
+    
+    # হ্যামার (Hammer)
+    if b1 > 0 and l1 >= 2.0 * b1 and u1 <= 0.1 * t1 and not d1: 
+        p.append({"n": "হ্যামার \U0001F528", "t": "bull"})
+        
+    # ইনভার্টেড হ্যামার (Inverted Hammer)
+    if b1 > 0 and u1 >= 2.0 * b1 and l1 <= 0.1 * t1 and g1 and not d1: 
+        p.append({"n": "ইনভার্টেড হ্যামার \U0001F528", "t": "bull"})
+        
+    # বুলিশ এনгалফিং (Bullish Engulfing)
+    if not g2 and g1 and c1['c'] >= c2['o'] and c1['o'] <= c2['c'] and b1 > b2: 
+        p.append({"n": "বুলিশ এনгалফিং \U0001F4C8", "t": "bull"})
+        
+    # মর্নিং স্টার (Morning Star)
+    if not g3 and b2 < (b3 * 0.3) and g1 and c1['c'] > (c3['o'] + c3['c']) / 2 and not d2: 
+        p.append({"n": "মর্নিং স্টার \U0001F305", "t": "bull"})
+        
+    # মর্নিং ডোজি স্টার (Morning Doji Star)
+    if not g3 and d2 and g1 and c1['c'] > (c3['o'] + c3['c']) / 2: 
+        p.append({"n": "মর্নিং ডোজি স্টার \U0001F305\u271D\uFE0F", "t": "bull"})
+        
+    # বুলিশ মারুবোজু (Bullish Marubozu)
+    if (b1 / t1) > 0.90 and g1: 
+        p.append({"n": "বুলিশ মারুবোজু \U0001F4AA", "t": "bull"})
+        
+    # পিয়ার্সিং লাইন (Piercing Line)
+    if not g2 and g1 and c1['o'] < c2['c'] and c1['c'] > (c2['o'] + c2['c']) / 2 and c1['c'] < c2['o']: 
+        p.append({"n": "পিয়ার্সিং লাইন \u26A1", "t": "bull"})
+        
+    # বুলিশ হারামি (Bullish Harami)
+    if not g2 and g1 and c1['c'] < c2['o'] and c1['o'] > c2['c'] and b1 < b2 and not d1: 
+        p.append({"n": "বুলিশ হারামি \U0001F930", "t": "bull"})
+        
+    # -বুলিশ হারামি ক্রস (Bullish Harami Cross)
+    if not g2 and d1 and c1['c'] < c2['o'] and c1['o'] > c2['c']: 
+        p.append({"n": "বুলিশ হারামি ক্রস \U0001F930\u271D\uFE0F", "t": "bull"})
+        
+    # থ্রি হোয়াইট সোলজার্স (Three White Soldiers)
+    if g1 and g2 and g3 and c1['c'] > c2['c'] and c2['c'] > c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2 and b3 > 0.3 * t3: 
+        p.append({"n": "থ্রি হোয়াইট সোলজার্স \U0001F482\u200D\u2642\uFE0F", "t": "bull"})
+        
+    # টুইজার বটম (Tweezer Bottom)
+    if abs(c1['l'] - c2['l']) / max(0.001, c1['l']) < 0.0015 and not g2 and g1: 
+        p.append({"n": "টুইজার বটম \U0001F9AA", "t": "bull"})
+        
+    # থ্রি ইনসাইড আপ (Three Inside Up)
+    if not g3 and g2 and c2['c'] <= c3['o'] and c2['o'] >= c3['c'] and b2 < b3 and g1 and c1['c'] > c2['c']:
+        p.append({"n": "থ্রি ইনসাইড আপ \U0001F4C8", "t": "bull"})
+        
+    # থ্রি আউটসাইড আপ (Three Outside Up)
+    if not g3 and g2 and c2['c'] <= c3['o'] and c2['o'] >= c3['c'] and b2 > b3 and g1 and c1['c'] > c2['c']:
+        p.append({"n": "থ্রি আউটসাইড আপ \U0001F4C8", "t": "bull"})
+        
+    # বুলিশ কিকার (Bullish Kicker)
+    if not g2 and (b2 / t2) > 0.8 and g1 and (b1 / t1) > 0.8 and c1['o'] >= c2['o']:
+        p.append({"n": "বুলিশ কিকার \U0001F45F", "t": "bull"})
+        
+    # -বুলিশ অ্যাবান্ডনড বেবি (Bullish Abandoned Baby)
+    if not g3 and d2 and g1 and c2['h'] < c3['l'] and c2['h'] < c1['l'] and c1['c'] > (c3['o'] + c3['c']) / 2:
+        p.append({"n": "বুলিশ অ্যাবান্ডনড বেবি \U0001F476", "t": "bull"})
+        
+    # বুলিশ বেল্ট হোল্ড (Bullish Belt Hold)
+    if g1 and l1 <= 0.05 * t1 and b1 >= 0.7 * t1 and u1 <= 0.2 * t1:
+        p.append({"n": "বুলিশ বেল্ট হোল্ড \U0001F94B", "t": "bull"})
+        
+    # রাইজিং থ্রি মেথডস (Rising Three Methods)
+    if g5 and (b5 / t5) > 0.7 and not g4 and not g3 and not g2 and g1 and c1['c'] > c5['c'] and min(c4['c'], c3['c'], c2['c']) > c5['o'] and max(c4['o'], c3['o'], c2['o']) < c5['c']:
+        p.append({"n": "রাইজিং থ্রি মেথডস \U0001F531", "t": "bull"})
+        
+    # আপসাইড তাসুকি গ্যাপ (Upside Tasuki Gap)
+    if g3 and g2 and c2['o'] > c3['c'] and not g1 and c1['o'] > c2['o'] and c1['c'] < c2['o'] and c1['c'] > c3['c']:
+        p.append({"n": "আপসাইড তাসুকি গ্যাপ \u2197\uFE0F", "t": "bull"})
 
-    # বেয়ারিশ প্যাটার্নস
-    if b1 > 0 and u1 >= 1.8 * b1 and l1 <= 0.2 * b1 and not g1: p.append({"n": "শুটিং স্টার ☄️", "t": "bear"})
-    if b1 > 0 and l1 >= 1.8 * b1 and u1 <= 0.2 * b1 and not g1: p.append({"n": "হ্যাঙ্গিং ম্যান 🕴️", "t": "bear"})
-    if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c']: p.append({"n": "বেয়ারিশ এনгалফিং 📉", "t": "bear"})
-    if g3 and b2 < (b3 * 0.3) and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2: p.append({"n": "ইভনিং স্টার 🌅", "t": "bear"})
-    if b1 / t1 > 0.85 and not g1: p.append({"n": "বেয়ারিশ মারুবোজু 🔴", "t": "bear"})
-    if g2 and not g1 and c1['o'] > c2['c'] and c1['c'] < (c2['o'] + c2['c']) / 2 and c1['c'] > c2['o']: p.append({"n": "ডার্ক ক্লাউড কভার ⛈️", "t": "bear"})
-    if g2 and not g1 and c1['c'] > c2['o'] and c1['o'] < c2['c'] and b1 < b2: p.append({"n": "বেয়ারিশ হারামি 🤰", "t": "bear"})
-    if not g1 and not g2 and not g3 and c1['c'] < c2['c'] and c2['c'] < c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2: p.append({"n": "থ্রি ব্ল্যাক ক্রোস 🐦", "t": "bear"})
+    # -----------------------------------------------------------------
+    # ২. বেয়ারিশ প্যাটার্নস (SHORT সিগন্যাল)
+    # -----------------------------------------------------------------
+    
+    # শুটিং স্টার (Shooting Star)
+    if b1 > 0 and u1 >= 2.0 * b1 and l1 <= 0.1 * t1 and not g1 and not d1: 
+        p.append({"n": "শুটিং স্টার \u2604\uFE0F", "t": "bear"})
+        
+    # হ্যাঙ্গিং ম্যান (Hanging Man)
+    if b1 > 0 and l1 >= 2.0 * b1 and u1 <= 0.1 * t1 and not g1 and not d1: 
+        p.append({"n": "হ্যাঙ্গিং ম্যান \U0001F574\uFE0F", "t": "bear"})
+        
+    # বেয়ারিশ এনгалফিং (Bearish Engulfing)
+    if g2 and not g1 and c1['c'] <= c2['o'] and c1['o'] >= c2['c'] and b1 > b2: 
+        p.append({"n": "বেয়ারিশ এনгалফিং \U0001F4C9", "t": "bear"})
+        
+    # ইভনিং স্টার (Evening Star)
+    if g3 and b2 < (b3 * 0.3) and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2 and not d2: 
+        p.append({"n": "ইভনিং স্টার \U0001F307", "t": "bear"})
+        
+    # ইভনিং ডোজি স্টার (Evening Doji Star)
+    if g3 and d2 and not g1 and c1['c'] < (c3['o'] + c3['c']) / 2: 
+        p.append({"n": "ইভনিং ডোজি স্টার \U0001F307\u271D\uFE0F", "t": "bear"})
+        
+    # বেয়ারিশ মারুবোজু (Bearish Marubozu)
+    if (b1 / t1) > 0.90 and not g1: 
+        p.append({"n": "বেয়ারিশ মারুবোজু \U0001F534", "t": "bear"})
+        
+    # ডার্ক ক্লাউড কভার (Dark Cloud Cover)
+    if g2 and not g1 and c1['o'] > c2['c'] and c1['c'] < (c2['o'] + c2['c']) / 2 and c1['c'] > c2['o']: 
+        p.append({"n": "ডার্ক ক্লাউড কভার \u26C8\uFE0F", "t": "bear"})
+        
+    # বেয়ারিশ হারামি (Bearish Harami)
+    if g2 and not g1 and c1['c'] > c2['o'] and c1['o'] < c2['c'] and b1 < b2 and not d1: 
+        p.append({"n": "বেয়ারিশ হারামি \U0001F930", "t": "bear"})
+        
+    # বেয়ারিশ হারামি ক্রস (Bearish Harami Cross)
+    if g2 and d1 and c1['c'] > c2['o'] and c1['o'] < c2['c']: 
+        p.append({"n": "বেয়ারিশ হারামি ক্রস \U0001F930\u271D\uFE0F", "t": "bear"})
+        
+    # থ্রি ব্ল্যাক ক্রোস (Three Black Crows)
+    if not g1 and not g2 and not g3 and c1['c'] < c2['c'] and c2['c'] < c3['c'] and b1 > 0.3 * t1 and b2 > 0.3 * t2 and b3 > 0.3 * t3: 
+        p.append({"n": "থ্রি ব্ল্যাক ক্রোস \U0001F426", "t": "bear"})
+        
+    # টুইজার টপ (Tweezer Top)
+    if abs(c1['h'] - c2['h']) / max(0.001, c1['h']) < 0.0015 and g2 and not g1: 
+        p.append({"n": "টুইজার টপ \U0001F9AA", "t": "bear"})
+        
+    # থ্রি ইনসাইড ডাউন (Three Inside Down)
+    if g3 and not g2 and c2['c'] <= c3['o'] and c2['o'] >= c3['c'] and b2 < b3 and not g1 and c1['c'] < c2['c']:
+        p.append({"n": "থ্রি ইনসাইড ডাউন \U0001F4C9", "t": "bear"})
+        
+    # থ্রি আউটসাইড ডাউন (Three Outside Down)
+    if g3 and not g2 and c2['c'] <= c3['o'] and c2['o'] >= c3['c'] and b2 > b3 and not g1 and c1['c'] < c2['c']:
+        p.append({"n": "থ্রি আউটসাইড ডাউন \U0001F4C9", "t": "bear"})
+        
+    # বেয়ারিশ কিকার (Bearish Kicker)
+    if g2 and (b2 / t2) > 0.8 and not g1 and (b1 / t1) > 0.8 and c1['o'] <= c2['o']:
+        p.append({"n": "বেয়ারিশ কিকার \U0001F45F", "t": "bear"})
+        
+    # বেয়ারিশ অ্যাবান্ডনড বেবি (Bearish Abandoned Baby)
+    if g3 and d2 and not g1 and c2['l'] > c3['h'] and c2['l'] > c1['h'] and c1['c'] < (c3['o'] + c3['c']) / 2:
+        p.append({"n": "বেয়ারিশ অ্যাবান্ডনড বেবি \U0001F476", "t": "bear"})
+        
+    # বেয়ারিশ বেল্ট হোল্ড (Bearish Belt Hold)
+    if not g1 and u1 <= 0.05 * t1 and b1 >= 0.7 * t1 and l1 <= 0.2 * t1:
+        p.append({"n": "বেয়ারিশ বেল্ট হোল্ড \U0001F94B", "t": "bear"})
+        
+    # ফলিং থ্রি মেথডস (Falling Three Methods)
+    if not g5 and (b5 / t5) > 0.7 and g4 and g3 and g2 and not g1 and c1['c'] < c5['c'] and max(c4['c'], c3['c'], c2['c']) < c5['o'] and min(c4['o'], c3['o'], c2['o']) > c5['c']:
+        p.append({"n": "ফলিং থ্রি মেথডস \U0001F531", "t": "bear"})
+        
+    # ডাউনসাইড তাসুকি গ্যাপ (Downside Tasuki Gap)
+    if not g3 and not g2 and c2['o'] < c3['c'] and g1 and c1['o'] < c2['o'] and c1['c'] > c2['o'] and c1['c'] < c3['c']:
+        p.append({"n": "ডাউনসাইড তাসুকি গ্যাপ \u2198\uFE0F", "t": "bear"})
+        
+    # অন নেক (On Neck)
+    if not g2 and (b2 / t2) > 0.7 and g1 and c1['o'] < c2['l'] and abs(c1['c'] - c2['l']) / c2['l'] < 0.002:
+        p.append({"n": "অন নেক \U0001F9E4", "t": "bear"})
+        
+    # ইন নেক (In Neck)
+    if not g2 and (b2 / t2) > 0.7 and g1 and c1['o'] < c2['l'] and c1['c'] > c2['l'] and c1['c'] <= c2['l'] + 0.1 * b2:
+        p.append({"n": "ইন নেক \U0001F9E4", "t": "bear"})
+
+    # -----------------------------------------------------------------
+    # ৩. নিরপেক্ষ / ইন্ডিকেশন প্যাটার্নস (Neutral / Indecision)
+    # -----------------------------------------------------------------
+    
+    # সাধারণ ডোজি (Standard Doji)
+    if d1 and u1 > 0.3 * t1 and l1 > 0.3 * t1:
+        p.append({"n": "ডোজি \u2696\uFE0F", "t": "neutral"})
+        
+    # ড্রাগনফ্লাই ডোজি (Dragonfly Doji)
+    if d1 and l1 >= 0.7 * t1 and u1 <= 0.1 * t1:
+        p.append({"n": "ড্রাগনফ্লাই ডোজি \U0001F6F8", "t": "neutral"})
+        
+    # গ্রেভস্টোন ডোজি (Gravestone Doji)
+    if d1 and u1 >= 0.7 * t1 and l1 <= 0.1 * t1:
+        p.append({"n": "গ্রেভস্টোন ডোজি \U0001FAA6", "t": "neutral"})
+        
+    # স্পিনিং টপ (Spinning Top)
+    if 0.1 <= (b1 / t1) <= 0.3 and u1 > 0.3 * t1 and l1 > 0.3 * t1:
+        p.append({"n": "স্পিনিং টপ \U0001F504", "t": "neutral"})
+
     return p
-
 
 # =====================================================================
 # SECTION 3.5: টাইম এস্টিমেটর ফরমেট হেল্পার এবং ক্যাশ মার্জ লজিক
